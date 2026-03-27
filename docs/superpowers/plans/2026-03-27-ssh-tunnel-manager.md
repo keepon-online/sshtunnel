@@ -10,6 +10,29 @@
 
 ---
 
+## Execution Status
+
+### Completed
+
+- Workspace bootstrap completed with a Rust workspace, Tauri app shell, static web frontend, README, and `.gitignore`.
+- Tunnel validation and `ssh -L` argument generation are implemented in `crates/core` with Rust tests.
+- Config persistence is implemented in the Tauri backend with JSON storage and password separation via `keyring`.
+- Runtime supervision exists for key auth and password auth, including PTY-driven password entry for system `ssh`.
+- Native `ssh` processes now stream live stderr lines into the recent log view for easier debugging.
+- Frontend shell exists with tunnel list, form, runtime status, recent log, and autostart toggle.
+- Frontend view-model tests now cover snapshot meta, tunnel status copy, and connect/disconnect action states.
+- Frontend list-rendering tests now cover item copy, localized badges, and active selection state.
+- Backend runtime tests now cover recent-log trimming, exit-state handling, and disconnect cleanup.
+- Tray menu now rebuilds dynamically with recent tunnel quick actions for direct connect/disconnect.
+- Packaging and CI are set up: local `cargo tauri build` support, Ubuntu verification workflow, and Windows installer workflow artifact upload.
+
+### Remaining Backlog
+
+- Add stronger automated tests around Tauri command flows plus status-card and log-panel rendering flows.
+- Verify password-auth execution on a real Windows machine.
+
+---
+
 ## File Structure
 
 - Create: `src-tauri/Cargo.toml`

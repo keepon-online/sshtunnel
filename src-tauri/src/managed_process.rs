@@ -1,5 +1,5 @@
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
@@ -14,8 +14,13 @@ pub struct ManagedProcess {
 }
 
 enum ManagedProcessInner {
-    Native(Child),
+    Native(NativeProcess),
     Prompted(PromptedProcess),
+}
+
+struct NativeProcess {
+    child: Child,
+    reader_thread: Option<JoinHandle<()>>,
 }
 
 struct PromptedProcess {
@@ -37,37 +42,41 @@ impl ManagedProcess {
 
     pub fn pid(&self) -> Option<u32> {
         match &self.inner {
-            ManagedProcessInner::Native(child) => Some(child.id()),
+            ManagedProcessInner::Native(child) => Some(child.child.id()),
             ManagedProcessInner::Prompted(child) => child.child.process_id(),
         }
     }
 
     pub fn try_wait(&mut self) -> Result<Option<String>, String> {
         match &mut self.inner {
-            ManagedProcessInner::Native(child) => child
-                .try_wait()
-                .map(|status| status.map(|item| format!("{item}")))
-                .map_err(|error| error.to_string()),
-            ManagedProcessInner::Prompted(child) => child
-                .child
-                .try_wait()
-                .map(|status| status.map(|item| format!("{item:?}")))
-                .map_err(|error| error.to_string()),
+            ManagedProcessInner::Native(child) => {
+                let status = child.child.try_wait().map_err(|error| error.to_string())?;
+                if status.is_some() {
+                    join_reader(&mut child.reader_thread);
+                }
+                Ok(status.map(|item| format!("{item}")))
+            }
+            ManagedProcessInner::Prompted(child) => {
+                let status = child.child.try_wait().map_err(|error| error.to_string())?;
+                if status.is_some() {
+                    join_reader(&mut child.reader_thread);
+                }
+                Ok(status.map(|item| format!("{item:?}")))
+            }
         }
     }
 
     pub fn kill(&mut self) -> Result<(), String> {
         match &mut self.inner {
             ManagedProcessInner::Native(child) => {
-                child.kill().map_err(|error| error.to_string())?;
-                let _ = child.wait();
+                child.child.kill().map_err(|error| error.to_string())?;
+                let _ = child.child.wait();
+                join_reader(&mut child.reader_thread);
             }
             ManagedProcessInner::Prompted(child) => {
                 child.child.kill().map_err(|error| error.to_string())?;
                 let _ = child.child.wait();
-                if let Some(handle) = child.reader_thread.take() {
-                    let _ = handle.join();
-                }
+                join_reader(&mut child.reader_thread);
             }
         }
 
@@ -84,13 +93,22 @@ impl ManagedProcess {
         child.args(command.args);
         child.stdin(Stdio::null());
         child.stdout(Stdio::null());
-        child.stderr(Stdio::null());
+        child.stderr(Stdio::piped());
 
-        let child = child.spawn().map_err(|error| error.to_string())?;
+        let mut child = child.spawn().map_err(|error| error.to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "failed to capture stderr pipe from native process".to_string())?;
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let reader_thread = spawn_native_stderr_reader(stderr, Arc::clone(&logs));
 
         Ok(Self {
-            inner: ManagedProcessInner::Native(child),
-            logs: Arc::new(Mutex::new(Vec::new())),
+            inner: ManagedProcessInner::Native(NativeProcess {
+                child,
+                reader_thread: Some(reader_thread),
+            }),
+            logs,
         })
     }
 
@@ -119,7 +137,10 @@ impl ManagedProcess {
             .master
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
-        let mut writer = pair.master.take_writer().map_err(|error| error.to_string())?;
+        let mut writer = pair
+            .master
+            .take_writer()
+            .map_err(|error| error.to_string())?;
 
         let logs = Arc::new(Mutex::new(Vec::new()));
         let password = password.to_string();
@@ -176,11 +197,105 @@ impl ManagedProcess {
     }
 }
 
+fn spawn_native_stderr_reader(
+    stderr: impl Read + Send + 'static,
+    logs: Arc<Mutex<Vec<String>>>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        push_log(&logs, trimmed);
+                    }
+                }
+                Err(error) => {
+                    push_log(&logs, &format!("stderr reader error: {error}"));
+                    break;
+                }
+            }
+        }
+    })
+}
+
+fn join_reader(reader_thread: &mut Option<JoinHandle<()>>) {
+    if let Some(handle) = reader_thread.take() {
+        let _ = handle.join();
+    }
+}
+
 fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: &str) {
     let mut guard = logs.lock().expect("managed-process logs poisoned");
     guard.push(line.to_string());
     if guard.len() > 24 {
         let trim = guard.len() - 24;
         guard.drain(0..trim);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use sshtunnel_core::ssh_launch::{CommandSpec, LaunchPlan};
+
+    use super::ManagedProcess;
+
+    #[test]
+    fn native_process_captures_stderr_lines() {
+        let mut process = ManagedProcess::spawn(LaunchPlan::Native(stderr_echo_command()))
+            .expect("spawn native stderr writer");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut lines = Vec::new();
+
+        while Instant::now() < deadline {
+            lines.extend(process.take_logs());
+            if lines.iter().any(|line| line.contains("stderr-first"))
+                && lines.iter().any(|line| line.contains("stderr-second"))
+            {
+                break;
+            }
+
+            if process.try_wait().expect("query child status").is_some() && !lines.is_empty() {
+                break;
+            }
+
+            std::thread::sleep(Duration::from_millis(25));
+        }
+
+        let _ = process.kill();
+
+        assert!(
+            lines.iter().any(|line| line.contains("stderr-first")),
+            "expected stderr-first in logs, got {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("stderr-second")),
+            "expected stderr-second in logs, got {lines:?}"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    fn stderr_echo_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec![
+                "/C".into(),
+                "(echo stderr-first 1>&2) && (echo stderr-second 1>&2)".into(),
+            ],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn stderr_echo_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "printf 'stderr-first\\nstderr-second\\n' >&2".into(),
+            ],
+        }
     }
 }

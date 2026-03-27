@@ -1,4 +1,10 @@
 const invoke = (command, args = {}) => window.__TAURI__.core.invoke(command, args);
+const {
+  describeTunnelActions,
+  describeTunnelListItem,
+  describeTunnelStatus,
+  summarizeSnapshotMeta,
+} = window.SshTunnelViewModel;
 
 const state = {
   snapshot: null,
@@ -8,6 +14,8 @@ const state = {
 const refs = {
   list: document.getElementById("tunnel-list"),
   sshStatus: document.getElementById("ssh-status"),
+  autostartStatus: document.getElementById("autostart-status"),
+  autostartToggle: document.getElementById("autostart-toggle"),
   configPath: document.getElementById("config-path"),
   formTitle: document.getElementById("form-title"),
   form: document.getElementById("tunnel-form"),
@@ -31,9 +39,10 @@ function setStatusCard(tunnel) {
     return;
   }
 
-  refs.statusCard.className = `status-card ${tunnel.status}`;
+  const statusCopy = describeTunnelStatus(tunnel.status);
+  refs.statusCard.className = `status-card ${statusCopy.tone}`;
   refs.statusCard.textContent = [
-    `状态: ${tunnel.status}`,
+    `状态: ${statusCopy.text}`,
     `SSH: ${tunnel.definition.username}@${tunnel.definition.ssh_host}`,
     `转发: ${tunnel.definition.local_bind_address}:${tunnel.definition.local_bind_port} -> ${tunnel.definition.remote_host}:${tunnel.definition.remote_port}`,
     tunnel.last_error ? `错误: ${tunnel.last_error}` : null,
@@ -72,14 +81,15 @@ function renderList() {
   refs.list.innerHTML = "";
 
   for (const tunnel of state.snapshot?.tunnels ?? []) {
+    const itemView = describeTunnelListItem(tunnel, state.selectedId);
     const item = document.createElement("button");
     item.type = "button";
-    item.className = `tunnel-item${tunnel.definition.id === state.selectedId ? " active" : ""}`;
+    item.className = `tunnel-item${itemView.isActive ? " active" : ""}`;
     item.innerHTML = `
-      <h3>${tunnel.definition.name}</h3>
-      <p>${tunnel.definition.username}@${tunnel.definition.ssh_host}</p>
-      <p>${tunnel.definition.local_bind_port} -> ${tunnel.definition.remote_host}:${tunnel.definition.remote_port}</p>
-      <span class="badge ${tunnel.status}">${tunnel.status}</span>
+      <h3>${itemView.title}</h3>
+      <p>${itemView.subtitle}</p>
+      <p>${itemView.forwardText}</p>
+      <span class="badge ${itemView.badgeTone}">${itemView.badgeText}</span>
     `;
     item.addEventListener("click", () => {
       state.selectedId = tunnel.definition.id;
@@ -90,14 +100,22 @@ function renderList() {
 }
 
 function render() {
-  refs.sshStatus.textContent = state.snapshot?.ssh_available ? "available" : "missing";
-  refs.configPath.textContent = state.snapshot?.config_path ?? "-";
+  const meta = summarizeSnapshotMeta(state.snapshot);
+  refs.sshStatus.textContent = meta.sshText;
+  refs.autostartStatus.textContent = meta.autostartText;
+  refs.autostartToggle.textContent = meta.autostartAction;
+  refs.configPath.textContent = meta.configPath;
 
   if (!state.selectedId && state.snapshot?.tunnels?.length) {
     state.selectedId = state.snapshot.tunnels[0].definition.id;
   }
 
   const tunnel = currentTunnel();
+  const actions = describeTunnelActions(tunnel);
+  refs.connectBtn.textContent = actions.connectText;
+  refs.connectBtn.disabled = actions.connectDisabled;
+  refs.disconnectBtn.textContent = actions.disconnectText;
+  refs.disconnectBtn.disabled = actions.disconnectDisabled;
   renderList();
   fillForm(tunnel);
   setStatusCard(tunnel);
@@ -158,6 +176,12 @@ refs.newTunnel.addEventListener("click", () => {
   fillForm(null);
   setStatusCard(null);
   renderList();
+});
+
+refs.autostartToggle.addEventListener("click", async () => {
+  const nextValue = !Boolean(state.snapshot?.autostart_enabled);
+  state.snapshot = await invoke("set_autostart", { enabled: nextValue });
+  render();
 });
 
 refs.connectBtn.addEventListener("click", async () => {
