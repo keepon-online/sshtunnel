@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSH Tunnel Manager</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div>
+        <p class="eyebrow">Tray-first SSH Tunnels</p>
+        <h1>SSH Tunnel Manager</h1>
+        <p class="muted">面向 Linux / Windows 的轻量本地端口转发管理工具。</p>
+      </div>
+      <button id="new-tunnel" class="secondary">新建隧道</button>
+      <div class="meta-card">
+        <div class="meta-row">
+          <span>System SSH</span>
+          <strong id="ssh-status">检查中</strong>
+        </div>
+        <div class="meta-row">
+          <span>Config</span>
+          <code id="config-path">-</code>
+        </div>
+      </div>
+      <div id="tunnel-list" class="tunnel-list"></div>
+    </aside>
+
+    <main class="main">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Tunnel Form</p>
+            <h2 id="form-title">新建隧道</h2>
+          </div>
+          <div class="actions">
+            <button id="connect-btn">连接</button>
+            <button id="disconnect-btn" class="secondary">断开</button>
+            <button id="delete-btn" class="danger">删除</button>
+          </div>
+        </div>
+
+        <form id="tunnel-form" class="form-grid">
+          <input type="hidden" id="tunnel-id">
+
+          <label>
+            <span>名称</span>
+            <input id="name" required>
+          </label>
+
+          <label>
+            <span>认证方式</span>
+            <select id="auth-kind">
+              <option value="private_key">密钥</option>
+              <option value="password">密码</option>
+            </select>
+          </label>
+
+          <label>
+            <span>SSH Host</span>
+            <input id="ssh-host" placeholder="bastion.example.com" required>
+          </label>
+
+          <label>
+            <span>SSH Port</span>
+            <input id="ssh-port" type="number" value="22" min="1" max="65535" required>
+          </label>
+
+          <label>
+            <span>用户名</span>
+            <input id="username" required>
+          </label>
+
+          <label>
+            <span>私钥路径</span>
+            <input id="private-key-path" placeholder="~/.ssh/id_ed25519">
+          </label>
+
+          <label>
+            <span>本地监听地址</span>
+            <input id="local-bind-address" value="127.0.0.1" required>
+          </label>
+
+          <label>
+            <span>本地端口</span>
+            <input id="local-bind-port" type="number" value="15432" min="1" max="65535" required>
+          </label>
+
+          <label>
+            <span>远端目标 Host</span>
+            <input id="remote-host" placeholder="10.0.0.12" required>
+          </label>
+
+          <label>
+            <span>远端目标 Port</span>
+            <input id="remote-port" type="number" value="5432" min="1" max="65535" required>
+          </label>
+
+          <label class="full-width password-row">
+            <span>密码</span>
+            <input id="password" type="password" placeholder="仅密码认证时填写，保存到系统凭据库">
+          </label>
+
+          <label class="checkbox">
+            <input id="auto-connect" type="checkbox">
+            <span>应用启动后自动连接</span>
+          </label>
+
+          <label class="checkbox">
+            <input id="auto-reconnect" type="checkbox" checked>
+            <span>断开后自动重连</span>
+          </label>
+
+          <div class="full-width form-actions">
+            <button type="submit">保存配置</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <p class="eyebrow">Status</p>
+          <h2>运行状态</h2>
+          <div id="status-card" class="status-card idle">未选择隧道</div>
+        </div>
+        <div>
+          <p class="eyebrow">Recent Log</p>
+          <h2>最近日志</h2>
+          <div id="recent-log" class="log-panel"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
