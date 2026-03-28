@@ -28,6 +28,7 @@
 - Backend runtime tests now cover recent-log trimming, exit-state handling, and disconnect cleanup.
 - Backend save/delete command helpers now have coverage for mutation order, auth-field normalization, runtime cleanup, and config persistence.
 - Backend connect/disconnect/autostart command helpers now have coverage for missing credentials, runtime replacement, disconnect idempotence, recent-order updates, and autostart branch selection.
+- Tray disconnect-all flow now has helper coverage for batch disconnect, idle safety, and recent-order updates.
 - Tray menu now rebuilds dynamically with recent tunnel quick actions for direct connect/disconnect.
 - Packaging and CI are set up: local `cargo tauri build` support, Ubuntu verification workflow, and Windows installer workflow artifact upload.
 

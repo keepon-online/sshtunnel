@@ -407,6 +407,14 @@ fn apply_disconnect(inner: &mut InnerState, id: &str) {
     touch_recent_tunnel(inner, id);
 }
 
+fn apply_disconnect_all(inner: &mut InnerState) {
+    let ids: Vec<String> = inner.tunnels.iter().map(|item| item.id.clone()).collect();
+    for id in ids {
+        disconnect_runtime(inner, &id);
+        touch_recent_tunnel(inner, &id);
+    }
+}
+
 fn apply_autostart_choice<E, Enable, Disable>(
     enabled: bool,
     enable: Enable,
@@ -651,12 +659,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                     let state = app.state::<AppState>();
                     let lock_result = state.inner.lock();
                     if let Ok(mut inner) = lock_result {
-                        let ids: Vec<String> =
-                            inner.tunnels.iter().map(|item| item.id.clone()).collect();
-                        for id in ids {
-                            disconnect_runtime(&mut inner, &id);
-                            touch_recent_tunnel(&mut inner, &id);
-                        }
+                        apply_disconnect_all(&mut inner);
                         let _ = refresh_tray_menu(app, &inner);
                     }
                 }
@@ -1201,6 +1204,150 @@ mod command_flow_tests {
             private_key_path: None,
             password_entry: Some(format!("profile:{id}")),
             ..private_key_tunnel(id)
+        }
+    }
+
+    fn spawn_process(command: CommandSpec) -> ManagedProcess {
+        ManagedProcess::spawn(LaunchPlan::Native(command)).expect("spawn managed process")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn long_running_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec!["/C".into(), "ping -n 6 127.0.0.1 > nul".into()],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn long_running_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "sleep 5".into()],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tray_disconnect_all_tests {
+    use sshtunnel_core::{
+        models::{AuthKind, TunnelDefinition},
+        ssh_launch::{CommandSpec, LaunchPlan},
+    };
+
+    use super::{InnerState, ManagedProcess, TunnelRuntime};
+
+    #[test]
+    fn apply_disconnect_all_stops_running_runtimes_and_clears_errors() {
+        let mut inner = InnerState {
+            tunnels: vec![tunnel("db"), tunnel("cache"), tunnel("metrics")],
+            runtimes: [
+                (
+                    "db".to_string(),
+                    TunnelRuntime {
+                        process: Some(spawn_process(long_running_command())),
+                        last_error: Some("old db error".into()),
+                        recent_log: Vec::new(),
+                    },
+                ),
+                (
+                    "cache".to_string(),
+                    TunnelRuntime {
+                        process: Some(spawn_process(long_running_command())),
+                        last_error: Some("old cache error".into()),
+                        recent_log: Vec::new(),
+                    },
+                ),
+                (
+                    "metrics".to_string(),
+                    TunnelRuntime {
+                        process: None,
+                        last_error: Some("idle warning".into()),
+                        recent_log: Vec::new(),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            recent_tunnel_ids: vec!["cache".into()],
+        };
+
+        super::apply_disconnect_all(&mut inner);
+
+        let db = inner.runtimes.get("db").expect("db runtime");
+        let cache = inner.runtimes.get("cache").expect("cache runtime");
+        let metrics = inner.runtimes.get("metrics").expect("metrics runtime");
+
+        assert!(db.process.is_none());
+        assert!(cache.process.is_none());
+        assert_eq!(db.last_error, None);
+        assert_eq!(cache.last_error, None);
+        assert_eq!(metrics.last_error, None);
+        assert!(db.recent_log.iter().any(|line| line.contains("stopped ssh process")));
+        assert!(cache.recent_log.iter().any(|line| line.contains("stopped ssh process")));
+        assert!(!metrics.recent_log.iter().any(|line| line.contains("stopped ssh process")));
+    }
+
+    #[test]
+    fn apply_disconnect_all_updates_recent_order_without_duplicates() {
+        let mut inner = InnerState {
+            tunnels: vec![tunnel("db"), tunnel("cache"), tunnel("metrics")],
+            runtimes: Default::default(),
+            recent_tunnel_ids: vec!["cache".into(), "db".into()],
+        };
+
+        super::apply_disconnect_all(&mut inner);
+
+        assert_eq!(
+            inner.recent_tunnel_ids,
+            vec![
+                "metrics".to_string(),
+                "cache".to_string(),
+                "db".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_disconnect_all_does_not_create_new_runtime_entries_for_idle_tunnels() {
+        let mut inner = InnerState {
+            tunnels: vec![tunnel("db"), tunnel("cache")],
+            runtimes: [(
+                "db".to_string(),
+                TunnelRuntime {
+                    process: Some(spawn_process(long_running_command())),
+                    last_error: None,
+                    recent_log: Vec::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            recent_tunnel_ids: vec![],
+        };
+
+        super::apply_disconnect_all(&mut inner);
+
+        assert!(inner.runtimes.contains_key("db"));
+        assert!(!inner.runtimes.contains_key("cache"));
+        assert_eq!(inner.recent_tunnel_ids, vec!["cache".to_string(), "db".to_string()]);
+    }
+
+    fn tunnel(id: &str) -> TunnelDefinition {
+        TunnelDefinition {
+            id: id.into(),
+            name: format!("{id}-name"),
+            ssh_host: "bastion.example.com".into(),
+            ssh_port: 22,
+            username: "deploy".into(),
+            local_bind_address: "127.0.0.1".into(),
+            local_bind_port: 15432,
+            remote_host: "10.0.0.12".into(),
+            remote_port: 5432,
+            auth_kind: AuthKind::PrivateKey,
+            private_key_path: Some("~/.ssh/id_ed25519".into()),
+            auto_connect: false,
+            auto_reconnect: true,
+            password_entry: None,
         }
     }
 
