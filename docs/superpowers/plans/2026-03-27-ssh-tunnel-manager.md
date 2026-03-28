@@ -22,13 +22,18 @@
 - Frontend shell exists with tunnel list, form, runtime status, recent log, and autostart toggle.
 - Frontend view-model tests now cover snapshot meta, tunnel status copy, and connect/disconnect action states.
 - Frontend list-rendering tests now cover item copy, localized badges, and active selection state.
+- Main window now uses a desktop-style left-list/right-workspace layout with drawer-based editing.
+- Workspace summary cards now surface connection state, forwarding details, auth mode, and inline error summaries.
+- Workspace log panel now groups status events and SSH output with error highlighting.
 - Backend runtime tests now cover recent-log trimming, exit-state handling, and disconnect cleanup.
+- Backend save/delete command helpers now have coverage for mutation order, auth-field normalization, runtime cleanup, and config persistence.
+- Backend connect/disconnect/autostart command helpers now have coverage for missing credentials, runtime replacement, disconnect idempotence, recent-order updates, and autostart branch selection.
 - Tray menu now rebuilds dynamically with recent tunnel quick actions for direct connect/disconnect.
 - Packaging and CI are set up: local `cargo tauri build` support, Ubuntu verification workflow, and Windows installer workflow artifact upload.
 
 ### Remaining Backlog
 
-- Add stronger automated tests around Tauri command flows plus status-card and log-panel rendering flows.
+- Add deeper integration coverage only where helper-level tests are still insufficient.
 - Verify password-auth execution on a real Windows machine.
 
 ---

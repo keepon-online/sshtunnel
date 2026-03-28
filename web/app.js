@@ -3,12 +3,18 @@ const {
   describeTunnelActions,
   describeTunnelListItem,
   describeTunnelStatus,
+  describeDiagnosticLogPanel,
+  describeEditorSheet,
+  describeStatusSummaryCards,
+  describeWorkspacePanel,
   summarizeSnapshotMeta,
 } = window.SshTunnelViewModel;
 
 const state = {
   snapshot: null,
   selectedId: null,
+  editorOpen: false,
+  editingId: null,
 };
 
 const refs = {
@@ -17,49 +23,102 @@ const refs = {
   autostartStatus: document.getElementById("autostart-status"),
   autostartToggle: document.getElementById("autostart-toggle"),
   configPath: document.getElementById("config-path"),
+  workspaceTitle: document.getElementById("workspace-title"),
+  workspaceSubtitle: document.getElementById("workspace-subtitle"),
   formTitle: document.getElementById("form-title"),
   form: document.getElementById("tunnel-form"),
+  saveTunnel: document.getElementById("save-tunnel"),
+  statusLabel: document.getElementById("status-label"),
   statusCard: document.getElementById("status-card"),
-  recentLog: document.getElementById("recent-log"),
+  statusSubtitle: document.getElementById("status-subtitle"),
+  statusError: document.getElementById("status-error"),
+  forwardLabel: document.getElementById("forward-label"),
+  forwardCard: document.getElementById("forward-card"),
+  authLabel: document.getElementById("auth-label"),
+  authCard: document.getElementById("auth-card"),
+  authMeta: document.getElementById("auth-meta"),
+  logSummary: document.getElementById("log-summary"),
+  statusEventsLog: document.getElementById("status-events-log"),
+  sshOutputLog: document.getElementById("ssh-output-log"),
   newTunnel: document.getElementById("new-tunnel"),
   connectBtn: document.getElementById("connect-btn"),
   disconnectBtn: document.getElementById("disconnect-btn"),
+  editBtn: document.getElementById("edit-btn"),
   deleteBtn: document.getElementById("delete-btn"),
+  drawerBackdrop: document.getElementById("drawer-backdrop"),
+  editorDrawer: document.getElementById("editor-drawer"),
+  closeDrawer: document.getElementById("close-drawer"),
+  cancelEdit: document.getElementById("cancel-edit"),
 };
 
 function currentTunnel() {
   return state.snapshot?.tunnels.find((item) => item.definition.id === state.selectedId) ?? null;
 }
 
-function setStatusCard(tunnel) {
+function currentEditingTunnel() {
+  if (!state.editingId) {
+    return null;
+  }
+
+  return state.snapshot?.tunnels.find((item) => item.definition.id === state.editingId) ?? null;
+}
+
+function renderWorkspace(tunnel) {
+  const workspace = describeWorkspacePanel(tunnel);
+  const summary = describeStatusSummaryCards(tunnel);
+  const logPanel = describeDiagnosticLogPanel(tunnel?.recent_log ?? []);
+  refs.workspaceTitle.textContent = workspace.title;
+  refs.workspaceSubtitle.textContent = workspace.subtitle;
+  refs.statusLabel.textContent = summary.primaryLabel;
+  refs.statusCard.className = `status-card ${summary.primaryTone}`;
+  refs.statusCard.textContent = summary.primaryText;
+  refs.statusSubtitle.textContent = summary.primarySubtitle;
+  refs.forwardLabel.textContent = summary.forwardLabel;
+  refs.forwardCard.textContent = summary.forwardText;
+  refs.authLabel.textContent = summary.authLabel;
+  refs.authCard.textContent = summary.authText;
+  refs.authMeta.textContent = summary.authMeta;
+  refs.authMeta.classList.toggle("hidden", !summary.authMeta);
+  refs.statusError.textContent = summary.errorText;
+  refs.statusError.classList.toggle("hidden", !summary.errorText);
+  refs.logSummary.textContent = logPanel.summaryText;
+
   if (!tunnel) {
-    refs.statusCard.className = "status-card idle";
-    refs.statusCard.textContent = "未选择隧道";
-    refs.recentLog.innerHTML = "";
+    refs.forwardCard.className = "summary-value muted";
+    refs.authCard.className = "summary-value muted";
+    renderLogSection(refs.statusEventsLog, [], "从左侧选择一条隧道后显示状态事件。");
+    renderLogSection(refs.sshOutputLog, [], "从左侧选择一条隧道后显示 SSH 输出。");
     return;
   }
 
-  const statusCopy = describeTunnelStatus(tunnel.status);
-  refs.statusCard.className = `status-card ${statusCopy.tone}`;
-  refs.statusCard.textContent = [
-    `状态: ${statusCopy.text}`,
-    `SSH: ${tunnel.definition.username}@${tunnel.definition.ssh_host}`,
-    `转发: ${tunnel.definition.local_bind_address}:${tunnel.definition.local_bind_port} -> ${tunnel.definition.remote_host}:${tunnel.definition.remote_port}`,
-    tunnel.last_error ? `错误: ${tunnel.last_error}` : null,
-  ].filter(Boolean).join(" | ");
+  refs.forwardCard.className = "summary-value";
+  refs.authCard.className = "summary-value";
+  renderLogSection(refs.statusEventsLog, logPanel.statusEvents, logPanel.emptyStatusText);
+  renderLogSection(refs.sshOutputLog, logPanel.sshOutput, logPanel.emptySshText);
+}
 
-  refs.recentLog.innerHTML = "";
-  const lines = tunnel.recent_log.length ? tunnel.recent_log : ["暂无日志"];
-  for (const line of lines) {
+function renderLogSection(container, entries, emptyText) {
+  container.innerHTML = "";
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "log-line";
+    empty.textContent = emptyText;
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const entry of entries) {
     const div = document.createElement("div");
-    div.className = "log-line";
-    div.textContent = line;
-    refs.recentLog.appendChild(div);
+    div.className = `log-line${entry.tone === "error" ? " error" : ""}`;
+    div.textContent = entry.text;
+    container.appendChild(div);
   }
 }
 
 function fillForm(tunnel) {
-  refs.formTitle.textContent = tunnel ? `编辑: ${tunnel.definition.name}` : "新建隧道";
+  const editorCopy = describeEditorSheet(tunnel);
+  refs.formTitle.textContent = editorCopy.title;
+  refs.saveTunnel.textContent = editorCopy.submitText;
   document.getElementById("tunnel-id").value = tunnel?.definition.id ?? "";
   document.getElementById("name").value = tunnel?.definition.name ?? "";
   document.getElementById("auth-kind").value = tunnel?.definition.auth_kind ?? "private_key";
@@ -75,6 +134,25 @@ function fillForm(tunnel) {
   document.getElementById("auto-connect").checked = tunnel?.definition.auto_connect ?? false;
   document.getElementById("auto-reconnect").checked = tunnel?.definition.auto_reconnect ?? true;
   syncAuthFields();
+}
+
+function openEditor(tunnel) {
+  state.editorOpen = true;
+  state.editingId = tunnel?.definition.id ?? null;
+  fillForm(tunnel);
+  refs.drawerBackdrop.classList.remove("hidden");
+  refs.editorDrawer.classList.remove("hidden");
+  refs.editorDrawer.setAttribute("aria-hidden", "false");
+  refs.drawerBackdrop.setAttribute("aria-hidden", "false");
+}
+
+function closeEditor() {
+  state.editorOpen = false;
+  state.editingId = null;
+  refs.drawerBackdrop.classList.add("hidden");
+  refs.editorDrawer.classList.add("hidden");
+  refs.editorDrawer.setAttribute("aria-hidden", "true");
+  refs.drawerBackdrop.setAttribute("aria-hidden", "true");
 }
 
 function renderList() {
@@ -116,9 +194,16 @@ function render() {
   refs.connectBtn.disabled = actions.connectDisabled;
   refs.disconnectBtn.textContent = actions.disconnectText;
   refs.disconnectBtn.disabled = actions.disconnectDisabled;
+  refs.editBtn.disabled = !tunnel;
+  refs.deleteBtn.disabled = !tunnel;
   renderList();
-  fillForm(tunnel);
-  setStatusCard(tunnel);
+  renderWorkspace(tunnel);
+
+  if (!state.editorOpen) {
+    closeEditor();
+  } else {
+    fillForm(currentEditingTunnel());
+  }
 }
 
 async function refresh() {
@@ -167,15 +252,16 @@ refs.form.addEventListener("submit", async (event) => {
 
   const payload = formPayload();
   state.snapshot = await invoke("save_tunnel", { payload });
-  state.selectedId = state.snapshot.tunnels.at(-1)?.definition.id ?? state.selectedId;
+  const savedId = payload.tunnel.id || state.snapshot.tunnels.at(-1)?.definition.id;
+  state.selectedId = state.snapshot.tunnels.find((item) => item.definition.id === savedId)?.definition.id
+    ?? state.snapshot.tunnels.at(-1)?.definition.id
+    ?? state.selectedId;
+  closeEditor();
   render();
 });
 
 refs.newTunnel.addEventListener("click", () => {
-  state.selectedId = null;
-  fillForm(null);
-  setStatusCard(null);
-  renderList();
+  openEditor(null);
 });
 
 refs.autostartToggle.addEventListener("click", async () => {
@@ -196,12 +282,22 @@ refs.disconnectBtn.addEventListener("click", async () => {
   render();
 });
 
+refs.editBtn.addEventListener("click", () => {
+  const tunnel = currentTunnel();
+  if (!tunnel) return;
+  openEditor(tunnel);
+});
+
 refs.deleteBtn.addEventListener("click", async () => {
   if (!state.selectedId) return;
   state.snapshot = await invoke("delete_tunnel", { id: state.selectedId });
   state.selectedId = state.snapshot.tunnels[0]?.definition.id ?? null;
   render();
 });
+
+refs.closeDrawer.addEventListener("click", closeEditor);
+refs.cancelEdit.addEventListener("click", closeEditor);
+refs.drawerBackdrop.addEventListener("click", closeEditor);
 
 document.getElementById("auth-kind").addEventListener("change", syncAuthFields);
 

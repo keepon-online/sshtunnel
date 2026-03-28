@@ -56,6 +56,18 @@ struct AppSnapshot {
     config_path: String,
 }
 
+#[derive(Debug)]
+struct PreparedConnect {
+    tunnel: TunnelDefinition,
+    password: Option<String>,
+}
+
+#[derive(Debug)]
+enum ConnectPreparation {
+    Launch(PreparedConnect),
+    MissingCredential,
+}
+
 #[derive(Debug, Deserialize)]
 struct SaveTunnelPayload {
     tunnel: TunnelDefinition,
@@ -122,26 +134,13 @@ fn save_tunnel(
     payload: SaveTunnelPayload,
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
-    let mut tunnel = payload.tunnel;
-    if tunnel.id.trim().is_empty() {
-        tunnel.id = generate_id(&tunnel.name);
-    }
-
-    if tunnel.auth_kind == AuthKind::Password {
-        tunnel.private_key_path = None;
-        tunnel.password_entry = Some(password_entry_name(&tunnel.id));
-    } else {
-        tunnel.password_entry = None;
-    }
-
-    tunnel.validate()?;
+    let tunnel = prepare_tunnel_for_save(payload.tunnel)?;
 
     {
         let mut inner = state
             .inner
             .lock()
             .map_err(|_| "state poisoned".to_string())?;
-        let recent_id = tunnel.id.clone();
 
         if tunnel.auth_kind == AuthKind::Password {
             if let Some(password) = payload.password.as_deref() {
@@ -153,16 +152,7 @@ fn save_tunnel(
             let _ = delete_password(&tunnel.id);
         }
 
-        match inner
-            .tunnels
-            .iter_mut()
-            .find(|existing| existing.id == tunnel.id)
-        {
-            Some(existing) => *existing = tunnel,
-            None => inner.tunnels.push(tunnel),
-        }
-
-        touch_recent_tunnel(&mut inner, &recent_id);
+        save_tunnel_to_inner(&mut inner, tunnel);
         persist_config(&state.config_path, &inner.tunnels)?;
         refresh_tray_menu(&app, &inner)?;
     }
@@ -181,10 +171,7 @@ fn delete_tunnel(
             .inner
             .lock()
             .map_err(|_| "state poisoned".to_string())?;
-        disconnect_runtime(&mut inner, &id);
-        inner.tunnels.retain(|item| item.id != id);
-        inner.runtimes.remove(&id);
-        remove_recent_tunnel(&mut inner, &id);
+        delete_tunnel_from_inner(&mut inner, &id);
         let _ = delete_password(&id);
         persist_config(&state.config_path, &inner.tunnels)?;
         refresh_tray_menu(&app, &inner)?;
@@ -205,45 +192,15 @@ fn connect_tunnel(
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
-    let tunnel = inner
-        .tunnels
-        .iter()
-        .find(|item| item.id == id)
-        .cloned()
-        .ok_or_else(|| format!("unknown tunnel id: {id}"))?;
-
-    tunnel.validate()?;
-    disconnect_runtime(&mut inner, &id);
-
-    if tunnel.auth_kind == AuthKind::Password {
-        if get_password(&tunnel.id).is_err() {
-            let runtime = inner.runtimes.entry(id).or_default();
-            runtime.last_error = Some("credential is missing in the system keychain".into());
-            push_log(runtime, "missing password credential");
+    let prepared = match prepare_connect_request(&mut inner, &id, get_password)? {
+        ConnectPreparation::Launch(prepared) => prepared,
+        ConnectPreparation::MissingCredential => {
             return snapshot_from_inner(&state.config_path, &app, &mut inner);
         }
-    }
-
-    let password = if tunnel.auth_kind == AuthKind::Password {
-        Some(get_password(&tunnel.id)?)
-    } else {
-        None
     };
-    let plan = build_launch_plan(&tunnel, password.as_deref())?;
+    let plan = build_launch_plan(&prepared.tunnel, prepared.password.as_deref())?;
     let process = ManagedProcess::spawn(plan)?;
-    let pid = process.pid();
-    let recent_id = id.clone();
-
-    {
-        let runtime = inner.runtimes.entry(id).or_default();
-        runtime.process = Some(process);
-        runtime.last_error = None;
-        match pid {
-            Some(pid) => push_log(runtime, &format!("spawned ssh process pid={pid}")),
-            None => push_log(runtime, "spawned interactive ssh process"),
-        }
-    }
-    touch_recent_tunnel(&mut inner, &recent_id);
+    apply_connected_runtime(&mut inner, &id, process);
 
     refresh_tray_menu(&app, &inner)?;
     snapshot_from_inner(&state.config_path, &app, &mut inner)
@@ -259,8 +216,7 @@ fn disconnect_tunnel(
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
-    disconnect_runtime(&mut inner, &id);
-    touch_recent_tunnel(&mut inner, &id);
+    apply_disconnect(&mut inner, &id);
     refresh_tray_menu(&app, &inner)?;
     snapshot_from_inner(&state.config_path, &app, &mut inner)
 }
@@ -272,11 +228,11 @@ fn set_autostart(
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     let autolaunch = app.autolaunch();
-    if enabled {
-        autolaunch.enable().map_err(|error| error.to_string())?;
-    } else {
-        autolaunch.disable().map_err(|error| error.to_string())?;
-    }
+    apply_autostart_choice(
+        enabled,
+        || autolaunch.enable(),
+        || autolaunch.disable(),
+    )?;
 
     snapshot(&state, &app)
 }
@@ -377,6 +333,117 @@ fn generate_id(name: &str) -> String {
         "{}-{millis}",
         if slug.is_empty() { "tunnel" } else { &slug }
     )
+}
+
+fn prepare_tunnel_for_save(mut tunnel: TunnelDefinition) -> Result<TunnelDefinition, String> {
+    if tunnel.id.trim().is_empty() {
+        tunnel.id = generate_id(&tunnel.name);
+    }
+
+    if tunnel.auth_kind == AuthKind::Password {
+        tunnel.private_key_path = None;
+        tunnel.password_entry = Some(password_entry_name(&tunnel.id));
+    } else {
+        tunnel.password_entry = None;
+    }
+
+    tunnel.validate()?;
+    Ok(tunnel)
+}
+
+fn prepare_connect_request<F>(
+    inner: &mut InnerState,
+    id: &str,
+    load_password: F,
+) -> Result<ConnectPreparation, String>
+where
+    F: FnOnce(&str) -> Result<String, String>,
+{
+    let tunnel = inner
+        .tunnels
+        .iter()
+        .find(|item| item.id == id)
+        .cloned()
+        .ok_or_else(|| format!("unknown tunnel id: {id}"))?;
+
+    tunnel.validate()?;
+    disconnect_runtime(inner, id);
+
+    if tunnel.auth_kind == AuthKind::Password {
+        match load_password(&tunnel.id) {
+            Ok(password) => Ok(ConnectPreparation::Launch(PreparedConnect {
+                tunnel,
+                password: Some(password),
+            })),
+            Err(_) => {
+                let runtime = inner.runtimes.entry(id.to_string()).or_default();
+                runtime.last_error = Some("credential is missing in the system keychain".into());
+                push_log(runtime, "missing password credential");
+                Ok(ConnectPreparation::MissingCredential)
+            }
+        }
+    } else {
+        Ok(ConnectPreparation::Launch(PreparedConnect {
+            tunnel,
+            password: None,
+        }))
+    }
+}
+
+fn apply_connected_runtime(inner: &mut InnerState, id: &str, process: ManagedProcess) {
+    let pid = process.pid();
+    let runtime = inner.runtimes.entry(id.to_string()).or_default();
+    runtime.process = Some(process);
+    runtime.last_error = None;
+    match pid {
+        Some(pid) => push_log(runtime, &format!("spawned ssh process pid={pid}")),
+        None => push_log(runtime, "spawned interactive ssh process"),
+    }
+    touch_recent_tunnel(inner, id);
+}
+
+fn apply_disconnect(inner: &mut InnerState, id: &str) {
+    disconnect_runtime(inner, id);
+    touch_recent_tunnel(inner, id);
+}
+
+fn apply_autostart_choice<E, Enable, Disable>(
+    enabled: bool,
+    enable: Enable,
+    disable: Disable,
+) -> Result<(), String>
+where
+    E: ToString,
+    Enable: FnOnce() -> Result<(), E>,
+    Disable: FnOnce() -> Result<(), E>,
+{
+    if enabled {
+        enable().map_err(|error| error.to_string())
+    } else {
+        disable().map_err(|error| error.to_string())
+    }
+}
+
+fn save_tunnel_to_inner(inner: &mut InnerState, tunnel: TunnelDefinition) {
+    let recent_id = tunnel.id.clone();
+
+    match inner
+        .tunnels
+        .iter_mut()
+        .find(|existing| existing.id == tunnel.id)
+    {
+        Some(existing) => *existing = tunnel,
+        None => inner.tunnels.push(tunnel),
+    }
+
+    touch_recent_tunnel(inner, &recent_id);
+}
+
+fn delete_tunnel_from_inner(inner: &mut InnerState, id: &str) {
+    disconnect_runtime(inner, id);
+    inner.tunnels.retain(|item| item.id != id);
+    inner.runtimes.remove(id);
+    remove_recent_tunnel(inner, id);
 }
 
 fn push_log(runtime: &mut TunnelRuntime, entry: &str) {
@@ -777,6 +844,368 @@ mod runtime_tests {
             program: "sh".into(),
             args: vec!["-c".into(), "echo boom >&2; exit 7".into()],
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn long_running_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec!["/C".into(), "ping -n 6 127.0.0.1 > nul".into()],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn long_running_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "sleep 5".into()],
+        }
+    }
+}
+
+#[cfg(test)]
+mod save_delete_tests {
+    use std::{
+        env,
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use sshtunnel_core::models::{AuthKind, TunnelDefinition};
+
+    use super::{
+        load_config, persist_config, InnerState, TunnelRuntime,
+    };
+
+    #[test]
+    fn prepare_tunnel_for_save_normalizes_password_auth_fields() {
+        let tunnel = TunnelDefinition {
+            auth_kind: AuthKind::Password,
+            private_key_path: Some("~/.ssh/id_ed25519".into()),
+            password_entry: None,
+            ..sample_tunnel("db")
+        };
+
+        let prepared = super::prepare_tunnel_for_save(tunnel).expect("normalize tunnel");
+
+        assert_eq!(prepared.private_key_path, None);
+        assert_eq!(prepared.password_entry.as_deref(), Some("profile:db"));
+    }
+
+    #[test]
+    fn save_tunnel_to_inner_inserts_new_tunnel_and_updates_recent_order() {
+        let mut inner = InnerState {
+            tunnels: vec![sample_tunnel("cache")],
+            runtimes: Default::default(),
+            recent_tunnel_ids: vec!["cache".into()],
+        };
+
+        let tunnel = super::prepare_tunnel_for_save(sample_tunnel("db")).expect("normalize tunnel");
+
+        super::save_tunnel_to_inner(&mut inner, tunnel);
+
+        assert_eq!(inner.tunnels.len(), 2);
+        let stored = inner
+            .tunnels
+            .iter()
+            .find(|item| item.id == "db")
+            .expect("saved tunnel present");
+        assert_eq!(stored.password_entry, None);
+        assert_eq!(inner.recent_tunnel_ids, vec!["db".to_string(), "cache".to_string()]);
+    }
+
+    #[test]
+    fn save_tunnel_to_inner_replaces_existing_tunnel_without_duplicates() {
+        let mut inner = InnerState {
+            tunnels: vec![sample_tunnel("db")],
+            runtimes: Default::default(),
+            recent_tunnel_ids: vec!["cache".into(), "db".into()],
+        };
+        let mut updated = sample_tunnel("db");
+        updated.name = "Database Prod".into();
+        updated.local_bind_port = 25432;
+        let tunnel = super::prepare_tunnel_for_save(updated).expect("normalize tunnel");
+
+        super::save_tunnel_to_inner(&mut inner, tunnel);
+
+        assert_eq!(inner.tunnels.len(), 1);
+        assert_eq!(inner.tunnels[0].name, "Database Prod");
+        assert_eq!(inner.tunnels[0].local_bind_port, 25432);
+        assert_eq!(inner.recent_tunnel_ids, vec!["db".to_string(), "cache".to_string()]);
+    }
+
+    #[test]
+    fn delete_tunnel_from_inner_removes_runtime_recent_entry_and_persisted_config() {
+        let config_path = unique_temp_path("delete-tunnel");
+        let survivor = sample_tunnel("cache");
+        let deleted = sample_tunnel("db");
+        let mut inner = InnerState {
+            tunnels: vec![deleted.clone(), survivor.clone()],
+            runtimes: [
+                ("db".to_string(), TunnelRuntime::default()),
+                ("cache".to_string(), TunnelRuntime::default()),
+            ]
+            .into_iter()
+            .collect(),
+            recent_tunnel_ids: vec!["db".into(), "cache".into()],
+        };
+        persist_config(&config_path, &inner.tunnels).expect("persist initial config");
+
+        super::delete_tunnel_from_inner(&mut inner, "db");
+        persist_config(&config_path, &inner.tunnels).expect("persist updated config");
+        let stored = load_config(&config_path).expect("load updated config");
+
+        assert_eq!(inner.tunnels, vec![survivor.clone()]);
+        assert!(!inner.runtimes.contains_key("db"));
+        assert_eq!(inner.recent_tunnel_ids, vec!["cache".to_string()]);
+        assert_eq!(stored.tunnels, vec![survivor]);
+
+        let _ = fs::remove_file(config_path);
+    }
+
+    fn sample_tunnel(id: &str) -> TunnelDefinition {
+        TunnelDefinition {
+            id: id.into(),
+            name: format!("{id}-name"),
+            ssh_host: "bastion.example.com".into(),
+            ssh_port: 22,
+            username: "deploy".into(),
+            local_bind_address: "127.0.0.1".into(),
+            local_bind_port: 15432,
+            remote_host: "10.0.0.12".into(),
+            remote_port: 5432,
+            auth_kind: AuthKind::PrivateKey,
+            private_key_path: Some("~/.ssh/id_ed25519".into()),
+            auto_connect: false,
+            auto_reconnect: true,
+            password_entry: Some("profile:stale".into()),
+        }
+    }
+
+    fn unique_temp_path(prefix: &str) -> PathBuf {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before epoch")
+            .as_millis();
+        env::temp_dir().join(format!("sshtunnel-{prefix}-{millis}.json"))
+    }
+}
+
+#[cfg(test)]
+mod command_flow_tests {
+    use std::cell::Cell;
+
+    use sshtunnel_core::{
+        models::{AuthKind, TunnelDefinition},
+        ssh_launch::{CommandSpec, LaunchPlan},
+    };
+
+    use super::{apply_autostart_choice, InnerState, ManagedProcess, TunnelRuntime};
+
+    #[test]
+    fn prepare_connect_request_returns_error_for_unknown_tunnel() {
+        let mut inner = InnerState::default();
+
+        let result = super::prepare_connect_request(&mut inner, "missing", |_| Ok(String::new()));
+
+        assert_eq!(result.expect_err("unknown id should fail"), "unknown tunnel id: missing");
+    }
+
+    #[test]
+    fn prepare_connect_request_marks_runtime_when_password_credential_is_missing() {
+        let mut inner = InnerState {
+            tunnels: vec![password_tunnel("db")],
+            runtimes: Default::default(),
+            recent_tunnel_ids: vec![],
+        };
+
+        let result = super::prepare_connect_request(&mut inner, "db", |_| Err("no secret".into()))
+            .expect("helper should not fail for missing credential");
+
+        assert!(matches!(result, super::ConnectPreparation::MissingCredential));
+        let runtime = inner.runtimes.get("db").expect("runtime should be created");
+        assert_eq!(
+            runtime.last_error.as_deref(),
+            Some("credential is missing in the system keychain")
+        );
+        assert!(
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("missing password credential"))
+        );
+    }
+
+    #[test]
+    fn apply_connected_runtime_replaces_old_runtime_clears_error_and_updates_recent_order() {
+        let mut inner = InnerState {
+            tunnels: vec![private_key_tunnel("db"), private_key_tunnel("cache")],
+            runtimes: [(
+                "db".to_string(),
+                TunnelRuntime {
+                    process: Some(spawn_process(long_running_command())),
+                    last_error: Some("stale failure".into()),
+                    recent_log: Vec::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            recent_tunnel_ids: vec!["cache".into(), "db".into()],
+        };
+
+        let prepared = match super::prepare_connect_request(&mut inner, "db", |_| Ok(String::new()))
+            .expect("prepare connect")
+        {
+            super::ConnectPreparation::Launch(prepared) => prepared,
+            super::ConnectPreparation::MissingCredential => {
+                panic!("expected launch preparation")
+            }
+        };
+
+        super::apply_connected_runtime(
+            &mut inner,
+            prepared.tunnel.id.as_str(),
+            spawn_process(long_running_command()),
+        );
+
+        let runtime = inner.runtimes.get("db").expect("runtime should remain present");
+        assert!(runtime.process.is_some());
+        assert_eq!(runtime.last_error, None);
+        assert!(
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("stopped ssh process"))
+        );
+        assert!(
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("spawned ssh process"))
+        );
+        assert_eq!(inner.recent_tunnel_ids[0], "db");
+    }
+
+    #[test]
+    fn apply_disconnect_stops_runtime_and_updates_recent_order() {
+        let mut inner = InnerState {
+            tunnels: vec![private_key_tunnel("db"), private_key_tunnel("cache")],
+            runtimes: [(
+                "db".to_string(),
+                TunnelRuntime {
+                    process: Some(spawn_process(long_running_command())),
+                    last_error: Some("old error".into()),
+                    recent_log: Vec::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            recent_tunnel_ids: vec!["cache".into(), "db".into()],
+        };
+
+        super::apply_disconnect(&mut inner, "db");
+
+        let runtime = inner.runtimes.get("db").expect("runtime should still exist");
+        assert!(runtime.process.is_none());
+        assert_eq!(runtime.last_error, None);
+        assert!(
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("stopped ssh process"))
+        );
+        assert_eq!(inner.recent_tunnel_ids, vec!["db".to_string(), "cache".to_string()]);
+    }
+
+    #[test]
+    fn apply_disconnect_is_idempotent_without_runtime() {
+        let mut inner = InnerState {
+            tunnels: vec![private_key_tunnel("db"), private_key_tunnel("cache")],
+            runtimes: Default::default(),
+            recent_tunnel_ids: vec!["cache".into(), "db".into()],
+        };
+
+        super::apply_disconnect(&mut inner, "db");
+
+        assert!(!inner.runtimes.contains_key("db"));
+        assert_eq!(inner.recent_tunnel_ids, vec!["db".to_string(), "cache".to_string()]);
+    }
+
+    #[test]
+    fn apply_autostart_choice_uses_enable_branch_when_requested() {
+        let enabled = Cell::new(false);
+        let disabled = Cell::new(false);
+
+        apply_autostart_choice(
+            true,
+            || {
+                enabled.set(true);
+                Ok::<(), &'static str>(())
+            },
+            || {
+                disabled.set(true);
+                Ok::<(), &'static str>(())
+            },
+        )
+        .expect("enable branch");
+
+        assert!(enabled.get());
+        assert!(!disabled.get());
+    }
+
+    #[test]
+    fn apply_autostart_choice_uses_disable_branch_and_preserves_error_text() {
+        let enabled = Cell::new(false);
+        let disabled = Cell::new(false);
+
+        let result = apply_autostart_choice(
+            false,
+            || {
+                enabled.set(true);
+                Ok::<(), &'static str>(())
+            },
+            || {
+                disabled.set(true);
+                Err::<(), _>("disable failed")
+            },
+        );
+
+        assert_eq!(result, Err("disable failed".into()));
+        assert!(!enabled.get());
+        assert!(disabled.get());
+    }
+
+    fn private_key_tunnel(id: &str) -> TunnelDefinition {
+        TunnelDefinition {
+            id: id.into(),
+            name: format!("{id}-name"),
+            ssh_host: "bastion.example.com".into(),
+            ssh_port: 22,
+            username: "deploy".into(),
+            local_bind_address: "127.0.0.1".into(),
+            local_bind_port: 15432,
+            remote_host: "10.0.0.12".into(),
+            remote_port: 5432,
+            auth_kind: AuthKind::PrivateKey,
+            private_key_path: Some("~/.ssh/id_ed25519".into()),
+            auto_connect: false,
+            auto_reconnect: true,
+            password_entry: None,
+        }
+    }
+
+    fn password_tunnel(id: &str) -> TunnelDefinition {
+        TunnelDefinition {
+            auth_kind: AuthKind::Password,
+            private_key_path: None,
+            password_entry: Some(format!("profile:{id}")),
+            ..private_key_tunnel(id)
+        }
+    }
+
+    fn spawn_process(command: CommandSpec) -> ManagedProcess {
+        ManagedProcess::spawn(LaunchPlan::Native(command)).expect("spawn managed process")
     }
 
     #[cfg(target_os = "windows")]

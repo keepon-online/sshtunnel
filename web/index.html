@@ -9,18 +9,20 @@
 <body>
   <div class="shell">
     <aside class="sidebar">
-      <div>
+      <div class="brand-block">
         <p class="eyebrow">Tray-first SSH Tunnels</p>
         <h1>SSH Tunnel Manager</h1>
-        <p class="muted">面向 Linux / Windows 的轻量本地端口转发管理工具。</p>
+        <p class="muted">轻量、可托盘化的本地端口转发工具。常用操作留在托盘，主窗口专注查看状态、日志和编辑配置。</p>
       </div>
-      <button id="new-tunnel" class="secondary">新建隧道</button>
+      <div class="sidebar-actions">
+        <button id="new-tunnel">新建隧道</button>
+      </div>
       <div class="meta-card">
-        <div class="meta-row">
+        <div class="meta-row compact">
           <span>System SSH</span>
           <strong id="ssh-status">检查中</strong>
         </div>
-        <div class="meta-row">
+        <div class="meta-row compact">
           <span>Autostart</span>
           <strong id="autostart-status">检查中</strong>
         </div>
@@ -30,114 +32,157 @@
         </div>
         <button id="autostart-toggle" type="button" class="secondary meta-button">检查中</button>
       </div>
-      <div id="tunnel-list" class="tunnel-list"></div>
+      <div class="list-section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Tunnels</p>
+            <h2>隧道列表</h2>
+          </div>
+        </div>
+        <div id="tunnel-list" class="tunnel-list"></div>
+      </div>
     </aside>
 
-    <main class="main">
-      <section class="panel">
-        <div class="panel-head">
+    <main class="workspace">
+      <section class="panel workspace-panel">
+        <div class="workspace-head">
           <div>
-            <p class="eyebrow">Tunnel Form</p>
-            <h2 id="form-title">新建隧道</h2>
+            <p class="eyebrow">Workspace</p>
+            <h2 id="workspace-title">选择一个隧道</h2>
+            <p id="workspace-subtitle" class="muted workspace-subtitle">从左侧选择现有隧道，或创建一个新的本地转发配置。</p>
           </div>
-          <div class="actions">
+          <div class="actions workspace-actions">
             <button id="connect-btn">连接</button>
             <button id="disconnect-btn" class="secondary">断开</button>
+            <button id="edit-btn" class="secondary">编辑</button>
             <button id="delete-btn" class="danger">删除</button>
           </div>
         </div>
-
-        <form id="tunnel-form" class="form-grid">
-          <input type="hidden" id="tunnel-id">
-
-          <label>
-            <span>名称</span>
-            <input id="name" required>
-          </label>
-
-          <label>
-            <span>认证方式</span>
-            <select id="auth-kind">
-              <option value="private_key">密钥</option>
-              <option value="password">密码</option>
-            </select>
-          </label>
-
-          <label>
-            <span>SSH Host</span>
-            <input id="ssh-host" placeholder="bastion.example.com" required>
-          </label>
-
-          <label>
-            <span>SSH Port</span>
-            <input id="ssh-port" type="number" value="22" min="1" max="65535" required>
-          </label>
-
-          <label>
-            <span>用户名</span>
-            <input id="username" required>
-          </label>
-
-          <label>
-            <span>私钥路径</span>
-            <input id="private-key-path" placeholder="~/.ssh/id_ed25519">
-          </label>
-
-          <label>
-            <span>本地监听地址</span>
-            <input id="local-bind-address" value="127.0.0.1" required>
-          </label>
-
-          <label>
-            <span>本地端口</span>
-            <input id="local-bind-port" type="number" value="15432" min="1" max="65535" required>
-          </label>
-
-          <label>
-            <span>远端目标 Host</span>
-            <input id="remote-host" placeholder="10.0.0.12" required>
-          </label>
-
-          <label>
-            <span>远端目标 Port</span>
-            <input id="remote-port" type="number" value="5432" min="1" max="65535" required>
-          </label>
-
-          <label class="full-width password-row">
-            <span>密码</span>
-            <input id="password" type="password" placeholder="仅密码认证时填写，保存到系统凭据库">
-          </label>
-
-          <label class="checkbox">
-            <input id="auto-connect" type="checkbox">
-            <span>应用启动后自动连接</span>
-          </label>
-
-          <label class="checkbox">
-            <input id="auto-reconnect" type="checkbox" checked>
-            <span>断开后自动重连</span>
-          </label>
-
-          <div class="full-width form-actions">
-            <button type="submit">保存配置</button>
+        <div class="workspace-grid">
+          <div class="summary-grid">
+            <article class="summary-card primary-summary-card">
+              <p id="status-label" class="eyebrow">Connection</p>
+              <div id="status-card" class="status-card idle">未选择</div>
+              <div id="status-subtitle" class="status-subtitle muted">从左侧选择现有隧道，或创建一个新的本地转发配置。</div>
+              <div id="status-error" class="status-error hidden"></div>
+            </article>
+            <article class="summary-card">
+              <p id="forward-label" class="eyebrow">Forwarding</p>
+              <div id="forward-card" class="summary-value muted">选择隧道后显示转发目标</div>
+            </article>
+            <article class="summary-card">
+              <p id="auth-label" class="eyebrow">Authentication</p>
+              <div id="auth-card" class="summary-value muted">选择隧道后显示认证方式</div>
+              <div id="auth-meta" class="summary-meta"></div>
+            </article>
           </div>
-        </form>
-      </section>
-
-      <section class="panel stack">
-        <div>
-          <p class="eyebrow">Status</p>
-          <h2>运行状态</h2>
-          <div id="status-card" class="status-card idle">未选择隧道</div>
-        </div>
-        <div>
-          <p class="eyebrow">Recent Log</p>
-          <h2>最近日志</h2>
-          <div id="recent-log" class="log-panel"></div>
+          <div class="detail-card">
+            <p class="eyebrow">Troubleshooting</p>
+            <h3>最近日志</h3>
+            <p id="log-summary" class="muted log-summary">暂无最近日志</p>
+            <div class="log-sections">
+              <section class="log-section">
+                <div class="log-section-head">状态事件</div>
+                <div id="status-events-log" class="log-panel"></div>
+              </section>
+              <section class="log-section">
+                <div class="log-section-head">SSH 输出</div>
+                <div id="ssh-output-log" class="log-panel"></div>
+              </section>
+            </div>
+          </div>
         </div>
       </section>
     </main>
   </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+  <aside id="editor-drawer" class="editor-drawer hidden" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">Editor</p>
+        <h2 id="form-title">新建隧道</h2>
+      </div>
+      <button id="close-drawer" type="button" class="secondary icon-button">关闭</button>
+    </div>
+
+    <form id="tunnel-form" class="form-grid">
+      <input type="hidden" id="tunnel-id">
+
+      <label>
+        <span>名称</span>
+        <input id="name" required>
+      </label>
+
+      <label>
+        <span>认证方式</span>
+        <select id="auth-kind">
+          <option value="private_key">密钥</option>
+          <option value="password">密码</option>
+        </select>
+      </label>
+
+      <label>
+        <span>SSH Host</span>
+        <input id="ssh-host" placeholder="bastion.example.com" required>
+      </label>
+
+      <label>
+        <span>SSH Port</span>
+        <input id="ssh-port" type="number" value="22" min="1" max="65535" required>
+      </label>
+
+      <label>
+        <span>用户名</span>
+        <input id="username" required>
+      </label>
+
+      <label>
+        <span>私钥路径</span>
+        <input id="private-key-path" placeholder="~/.ssh/id_ed25519">
+      </label>
+
+      <label>
+        <span>本地监听地址</span>
+        <input id="local-bind-address" value="127.0.0.1" required>
+      </label>
+
+      <label>
+        <span>本地端口</span>
+        <input id="local-bind-port" type="number" value="15432" min="1" max="65535" required>
+      </label>
+
+      <label>
+        <span>远端目标 Host</span>
+        <input id="remote-host" placeholder="10.0.0.12" required>
+      </label>
+
+      <label>
+        <span>远端目标 Port</span>
+        <input id="remote-port" type="number" value="5432" min="1" max="65535" required>
+      </label>
+
+      <label class="full-width password-row">
+        <span>密码</span>
+        <input id="password" type="password" placeholder="仅密码认证时填写，保存到系统凭据库">
+      </label>
+
+      <label class="checkbox">
+        <input id="auto-connect" type="checkbox">
+        <span>应用启动后自动连接</span>
+      </label>
+
+      <label class="checkbox">
+        <input id="auto-reconnect" type="checkbox" checked>
+        <span>断开后自动重连</span>
+      </label>
+
+      <div class="full-width form-actions">
+        <button id="cancel-edit" type="button" class="secondary">取消</button>
+        <button id="save-tunnel" type="submit">保存配置</button>
+      </div>
+    </form>
+  </aside>
 
   <script src="./view-model.js"></script>
   <script src="./app.js"></script>
