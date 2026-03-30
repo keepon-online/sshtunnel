@@ -588,19 +588,18 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     manager: &M,
     recent_items: &[TrayTunnelItem],
 ) -> tauri::Result<Menu<R>> {
-    let open = MenuItemBuilder::with_id("open", "Open SSH Tunnel Manager").build(manager)?;
-    let disconnect_all =
-        MenuItemBuilder::with_id("disconnect_all", "Disconnect All").build(manager)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(manager)?;
+    let open = MenuItemBuilder::with_id("open", "打开 SSH 隧道管理器").build(manager)?;
+    let disconnect_all = MenuItemBuilder::with_id("disconnect_all", "全部断开").build(manager)?;
+    let quit = MenuItemBuilder::with_id("quit", "退出").build(manager)?;
     let submenu = if recent_items.is_empty() {
-        let placeholder = MenuItemBuilder::with_id("recent:none", "No tunnels configured")
+        let placeholder = MenuItemBuilder::with_id("recent:none", "暂无隧道配置")
             .enabled(false)
             .build(manager)?;
-        SubmenuBuilder::new(manager, "Recent Tunnels")
+        SubmenuBuilder::new(manager, "最近隧道")
             .item(&placeholder)
             .build()?
     } else {
-        let mut builder = SubmenuBuilder::new(manager, "Recent Tunnels");
+        let mut builder = SubmenuBuilder::new(manager, "最近隧道");
         for item in recent_items {
             builder = builder.text(
                 tray_action_id(item.action, &item.tunnel_id),

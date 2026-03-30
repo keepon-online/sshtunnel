@@ -93,11 +93,11 @@ mod tests {
 
         assert_eq!(
             tray_action_label(&connected_items[0]),
-            "Disconnect: Database (deploy@db.example.com)"
+            "断开：Database (deploy@db.example.com)"
         );
         assert_eq!(
             tray_action_label(&idle_items[0]),
-            "Connect: Database (deploy@db.example.com)"
+            "连接：Database (deploy@db.example.com)"
         );
     }
 }

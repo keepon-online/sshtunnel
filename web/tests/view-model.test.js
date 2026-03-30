@@ -34,14 +34,14 @@ function sampleTunnel(status = "idle") {
 
 test("describeAutostart returns enabled copy", () => {
   assert.deepEqual(describeAutostart(true), {
-    statusText: "enabled",
+    statusText: "已开启",
     actionText: "关闭开机自启",
   });
 });
 
 test("describeAutostart returns disabled copy", () => {
   assert.deepEqual(describeAutostart(false), {
-    statusText: "disabled",
+    statusText: "已关闭",
     actionText: "开启开机自启",
   });
 });
@@ -54,8 +54,8 @@ test("summarizeSnapshotMeta includes autostart and ssh labels", () => {
       config_path: "/tmp/sshtunnel/config.json",
     }),
     {
-      sshText: "available",
-      autostartText: "disabled",
+      sshText: "可用",
+      autostartText: "已关闭",
       autostartAction: "开启开机自启",
       configPath: "/tmp/sshtunnel/config.json",
     },
@@ -162,13 +162,14 @@ test("describeEditorSheet returns edit-mode copy", () => {
 test("describeStatusSummaryCards returns empty-state summary", () => {
   assert.deepEqual(describeStatusSummaryCards(null), {
     primaryLabel: "Connection",
+    primaryLabel: "连接状态",
     primaryTone: "idle",
     primaryText: "未选择",
     primarySubtitle: "从左侧选择现有隧道，或创建一个新的本地转发配置。",
     errorText: "",
     forwardLabel: "本地转发",
     forwardText: "选择隧道后显示转发目标",
-    authLabel: "Authentication",
+    authLabel: "认证方式",
     authText: "选择隧道后显示认证方式",
     authMeta: "",
   });
@@ -176,14 +177,14 @@ test("describeStatusSummaryCards returns empty-state summary", () => {
 
 test("describeStatusSummaryCards returns connected summary", () => {
   assert.deepEqual(describeStatusSummaryCards(sampleTunnel("connected")), {
-    primaryLabel: "Connection",
+    primaryLabel: "连接状态",
     primaryTone: "connected",
     primaryText: "已连接",
     primarySubtitle: "deploy@bastion.example.com",
     errorText: "",
     forwardLabel: "本地转发",
     forwardText: "127.0.0.1:15432 -> 10.0.0.12:5432",
-    authLabel: "Authentication",
+    authLabel: "认证方式",
     authText: "密钥认证",
     authMeta: "自动重连: 开启",
   });
@@ -195,14 +196,14 @@ test("describeStatusSummaryCards surfaces error summary and auth details", () =>
   tunnel.definition.auto_reconnect = false;
 
   assert.deepEqual(describeStatusSummaryCards(tunnel), {
-    primaryLabel: "Connection",
+    primaryLabel: "连接状态",
     primaryTone: "error",
     primaryText: "错误",
     primarySubtitle: "deploy@bastion.example.com",
     errorText: "ssh exited with status code 7",
     forwardLabel: "本地转发",
     forwardText: "127.0.0.1:15432 -> 10.0.0.12:5432",
-    authLabel: "Authentication",
+    authLabel: "认证方式",
     authText: "密码认证",
     authMeta: "自动重连: 关闭",
   });

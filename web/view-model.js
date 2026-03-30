@@ -10,11 +10,11 @@
   function describeAutostart(enabled) {
     return enabled
       ? {
-          statusText: "enabled",
+          statusText: "已开启",
           actionText: "关闭开机自启",
         }
       : {
-          statusText: "disabled",
+          statusText: "已关闭",
           actionText: "开启开机自启",
         };
   }
@@ -121,14 +121,14 @@
   function describeStatusSummaryCards(tunnel) {
     if (!tunnel) {
       return {
-        primaryLabel: "Connection",
+        primaryLabel: "连接状态",
         primaryTone: "idle",
         primaryText: "未选择",
         primarySubtitle: "从左侧选择现有隧道，或创建一个新的本地转发配置。",
         errorText: "",
         forwardLabel: "本地转发",
         forwardText: "选择隧道后显示转发目标",
-        authLabel: "Authentication",
+        authLabel: "认证方式",
         authText: "选择隧道后显示认证方式",
         authMeta: "",
       };
@@ -137,14 +137,14 @@
     const statusCopy = describeTunnelStatus(tunnel.status);
     const definition = tunnel.definition ?? {};
     return {
-      primaryLabel: "Connection",
+      primaryLabel: "连接状态",
       primaryTone: statusCopy.tone,
       primaryText: statusCopy.text,
       primarySubtitle: `${definition.username ?? ""}@${definition.ssh_host ?? ""}`,
       errorText: tunnel.last_error ?? "",
       forwardLabel: "本地转发",
       forwardText: `${definition.local_bind_address ?? ""}:${definition.local_bind_port ?? ""} -> ${definition.remote_host ?? ""}:${definition.remote_port ?? ""}`,
-      authLabel: "Authentication",
+      authLabel: "认证方式",
       authText: definition.auth_kind === "password" ? "密码认证" : "密钥认证",
       authMeta: `自动重连: ${definition.auto_reconnect ? "开启" : "关闭"}`,
     };
@@ -208,7 +208,7 @@
     const autostart = describeAutostart(Boolean(snapshot?.autostart_enabled));
 
     return {
-      sshText: snapshot?.ssh_available ? "available" : "missing",
+      sshText: snapshot?.ssh_available ? "可用" : "缺失",
       autostartText: autostart.statusText,
       autostartAction: autostart.actionText,
       configPath: snapshot?.config_path ?? "-",

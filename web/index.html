@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SSH Tunnel Manager</title>
+  <title>SSH 隧道管理器</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand-block">
-        <p class="eyebrow">Tray-first SSH Tunnels</p>
-        <h1>SSH Tunnel Manager</h1>
+        <p class="eyebrow">托盘优先 SSH 隧道</p>
+        <h1>SSH 隧道管理器</h1>
         <p class="muted">轻量、可托盘化的本地端口转发工具。常用操作留在托盘，主窗口专注查看状态、日志和编辑配置。</p>
       </div>
       <div class="sidebar-actions">
@@ -19,15 +19,15 @@
       </div>
       <div class="meta-card">
         <div class="meta-row compact">
-          <span>System SSH</span>
+          <span>系统 SSH</span>
           <strong id="ssh-status">检查中</strong>
         </div>
         <div class="meta-row compact">
-          <span>Autostart</span>
+          <span>开机自启</span>
           <strong id="autostart-status">检查中</strong>
         </div>
         <div class="meta-row">
-          <span>Config</span>
+          <span>配置文件</span>
           <code id="config-path">-</code>
         </div>
         <button id="autostart-toggle" type="button" class="secondary meta-button">检查中</button>
@@ -35,7 +35,7 @@
       <div class="list-section">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Tunnels</p>
+            <p class="eyebrow">隧道</p>
             <h2>隧道列表</h2>
           </div>
         </div>
@@ -47,7 +47,7 @@
       <section class="panel workspace-panel">
         <div class="workspace-head">
           <div>
-            <p class="eyebrow">Workspace</p>
+            <p class="eyebrow">工作区</p>
             <h2 id="workspace-title">选择一个隧道</h2>
             <p id="workspace-subtitle" class="muted workspace-subtitle">从左侧选择现有隧道，或创建一个新的本地转发配置。</p>
           </div>
@@ -61,7 +61,7 @@
         <div class="workspace-grid">
           <div class="summary-grid">
             <article class="summary-card primary-summary-card">
-              <p id="status-label" class="eyebrow">Connection</p>
+              <p id="status-label" class="eyebrow">连接状态</p>
               <div id="status-card" class="status-card idle">未选择</div>
               <div id="status-subtitle" class="status-subtitle muted">从左侧选择现有隧道，或创建一个新的本地转发配置。</div>
               <div id="status-error" class="status-error hidden"></div>
@@ -71,13 +71,13 @@
               <div id="forward-card" class="summary-value muted">选择隧道后显示转发目标</div>
             </article>
             <article class="summary-card">
-              <p id="auth-label" class="eyebrow">Authentication</p>
+              <p id="auth-label" class="eyebrow">认证方式</p>
               <div id="auth-card" class="summary-value muted">选择隧道后显示认证方式</div>
               <div id="auth-meta" class="summary-meta"></div>
             </article>
           </div>
           <div class="detail-card">
-            <p class="eyebrow">Troubleshooting</p>
+            <p class="eyebrow">故障排查</p>
             <h3>最近日志</h3>
             <p id="log-summary" class="muted log-summary">暂无最近日志</p>
             <div class="log-sections">
@@ -100,7 +100,7 @@
   <aside id="editor-drawer" class="editor-drawer hidden" aria-hidden="true">
     <div class="drawer-head">
       <div>
-        <p class="eyebrow">Editor</p>
+        <p class="eyebrow">编辑器</p>
         <h2 id="form-title">新建隧道</h2>
       </div>
       <button id="close-drawer" type="button" class="secondary icon-button">关闭</button>
@@ -123,12 +123,12 @@
       </label>
 
       <label>
-        <span>SSH Host</span>
+        <span>SSH 主机</span>
         <input id="ssh-host" placeholder="bastion.example.com" required>
       </label>
 
       <label>
-        <span>SSH Port</span>
+        <span>SSH 端口</span>
         <input id="ssh-port" type="number" value="22" min="1" max="65535" required>
       </label>
 
@@ -156,12 +156,12 @@
       </label>
 
       <label>
-        <span>远端目标 Host</span>
+        <span>远端目标主机</span>
         <input id="remote-host" placeholder="10.0.0.12" required>
       </label>
 
       <label>
-        <span>远端目标 Port</span>
+        <span>远端目标端口</span>
         <input id="remote-port" type="number" value="5432" min="1" max="65535" required>
       </label>
 

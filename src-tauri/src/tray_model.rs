@@ -69,9 +69,9 @@ pub fn tray_action_id(action: TrayTunnelAction, tunnel_id: &str) -> String {
 
 pub fn tray_action_label(item: &TrayTunnelItem) -> String {
     let action_label = match item.action {
-        TrayTunnelAction::Connect => "Connect",
-        TrayTunnelAction::Disconnect => "Disconnect",
+        TrayTunnelAction::Connect => "连接",
+        TrayTunnelAction::Disconnect => "断开",
     };
 
-    format!("{action_label}: {} ({})", item.title, item.detail)
+    format!("{action_label}：{} ({})", item.title, item.detail)
 }
