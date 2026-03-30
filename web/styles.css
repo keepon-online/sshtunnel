@@ -17,6 +17,9 @@
   --danger-soft: rgba(179, 57, 44, 0.14);
   --idle: #58697a;
   --idle-soft: rgba(88, 105, 122, 0.14);
+  --scrollbar-thumb: rgba(21, 33, 45, 0.16);
+  --scrollbar-thumb-hover: rgba(21, 33, 45, 0.28);
+  --scrollbar-track: rgba(21, 33, 45, 0.04);
   --shell-shadow: 0 28px 64px rgba(15, 26, 38, 0.14);
   --panel-shadow: 0 18px 44px rgba(15, 26, 38, 0.12);
   --drawer-shadow: -24px 0 64px rgba(11, 18, 28, 0.3);
@@ -40,6 +43,36 @@ body {
     radial-gradient(circle at top right, rgba(39, 133, 121, 0.12), transparent 26%),
     radial-gradient(circle at bottom right, rgba(179, 57, 44, 0.1), transparent 32%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+}
+
+.tunnel-list,
+.editor-drawer {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.tunnel-list::-webkit-scrollbar,
+.editor-drawer::-webkit-scrollbar {
+  width: 10px;
+}
+
+.tunnel-list::-webkit-scrollbar-track,
+.editor-drawer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tunnel-list::-webkit-scrollbar-thumb,
+.editor-drawer::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.tunnel-list:hover::-webkit-scrollbar-thumb,
+.editor-drawer:hover::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 .shell {
