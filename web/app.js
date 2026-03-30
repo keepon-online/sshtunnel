@@ -82,6 +82,10 @@
     input.value = path;
   }
 
+  function shouldRefreshSnapshot(state, visibilityState) {
+    return visibilityState === "visible" && !state?.editorOpen;
+  }
+
   function bootstrap(host, document) {
     const bridge = createDesktopBridge(host);
     const invoke = (command, args = {}) => bridge.invoke(command, args);
@@ -294,8 +298,6 @@
 
       if (!state.editorOpen) {
         closeEditor();
-      } else {
-        fillForm(currentEditingTunnel());
       }
     }
 
@@ -420,7 +422,7 @@
     refs.authKind.addEventListener("change", syncAuthFields);
 
     setInterval(() => {
-      if (document.visibilityState === "visible") {
+      if (shouldRefreshSnapshot(state, document.visibilityState)) {
         refresh();
       }
     }, 4000);
@@ -435,6 +437,7 @@
     createDesktopBridge,
     fillPrivateKeyPath,
     normalizeDialogSelection,
+    shouldRefreshSnapshot,
     setEditorError,
   };
 });

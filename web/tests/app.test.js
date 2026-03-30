@@ -5,6 +5,7 @@ const {
   DESKTOP_ONLY_MESSAGE,
   createDesktopBridge,
   fillPrivateKeyPath,
+  shouldRefreshSnapshot,
   setEditorError,
 } = require("../app.js");
 
@@ -60,4 +61,10 @@ test("fillPrivateKeyPath writes the selected path back into the input", () => {
   fillPrivateKeyPath(input, "/home/top/.ssh/id_ed25519");
 
   assert.equal(input.value, "/home/top/.ssh/id_ed25519");
+});
+
+test("shouldRefreshSnapshot pauses auto refresh while the editor drawer is open", () => {
+  assert.equal(shouldRefreshSnapshot({ editorOpen: true }, "visible"), false);
+  assert.equal(shouldRefreshSnapshot({ editorOpen: false }, "visible"), true);
+  assert.equal(shouldRefreshSnapshot({ editorOpen: false }, "hidden"), false);
 });
