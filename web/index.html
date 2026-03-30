@@ -67,7 +67,7 @@
               <div id="status-error" class="status-error hidden"></div>
             </article>
             <article class="summary-card">
-              <p id="forward-label" class="eyebrow">Forwarding</p>
+              <p id="forward-label" class="eyebrow">本地转发</p>
               <div id="forward-card" class="summary-value muted">选择隧道后显示转发目标</div>
             </article>
             <article class="summary-card">
@@ -139,7 +139,10 @@
 
       <label>
         <span>私钥路径</span>
-        <input id="private-key-path" placeholder="~/.ssh/id_ed25519">
+        <div class="field-with-action">
+          <input id="private-key-path" placeholder="~/.ssh/id_ed25519">
+          <button id="pick-private-key" type="button" class="secondary inline-action">选择文件</button>
+        </div>
       </label>
 
       <label>
@@ -166,6 +169,8 @@
         <span>密码</span>
         <input id="password" type="password" placeholder="仅密码认证时填写，保存到系统凭据库">
       </label>
+
+      <div id="editor-error" class="editor-error hidden full-width"></div>
 
       <label class="checkbox">
         <input id="auto-connect" type="checkbox">

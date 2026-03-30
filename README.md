@@ -23,6 +23,7 @@
 - 已为后端 save/delete 配置流增加状态变更与持久化测试
 - 已为 connect/disconnect/autostart 命令流增加 helper 级自动化测试
 - 已为 tray `disconnect_all` 分支增加批量断开 helper 测试
+- 已修复桌面前端的 Tauri bridge 容错，保存失败会在抽屉内显示，并支持私钥文件选择
 - GitHub Actions 已支持 Ubuntu 校验、Linux `.deb` 构建和 Windows `.exe` 安装包构建
 
 ## 目录结构

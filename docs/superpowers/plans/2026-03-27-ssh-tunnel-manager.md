@@ -30,6 +30,7 @@
 - Backend connect/disconnect/autostart command helpers now have coverage for missing credentials, runtime replacement, disconnect idempotence, recent-order updates, and autostart branch selection.
 - Tray disconnect-all flow now has helper coverage for batch disconnect, idle safety, and recent-order updates.
 - Tray menu now rebuilds dynamically with recent tunnel quick actions for direct connect/disconnect.
+- Desktop editor flow now guards Tauri bridge access, shows inline drawer save errors, and supports private-key file picking via the dialog plugin.
 - Packaging and CI are set up: local `cargo tauri build` support, Ubuntu verification workflow, Linux `.deb` artifact upload, and Windows installer workflow artifact upload.
 
 ### Remaining Backlog
