@@ -11,6 +11,9 @@ const {
   describeStatusSummaryCards,
   describeWorkspacePanel,
   summarizeSnapshotMeta,
+  describeCommandCenterHero,
+  describeCommandCenterCards,
+  describeCommandCenterTimeline,
 } = require("../view-model.js");
 
 function sampleTunnel(status = "idle") {
@@ -242,4 +245,91 @@ test("describeDiagnosticLogPanel returns empty-state summary when no logs exist"
     emptyStatusText: "暂无状态事件",
     emptySshText: "暂无 SSH 输出",
   });
+});
+
+test("describeCommandCenterHero returns empty state when no tunnel is selected", () => {
+  assert.deepEqual(describeCommandCenterHero(null), {
+    title: "选择一个隧道",
+    subtitle: "从左侧选择现有隧道，或创建一个新的本地转发配置。",
+    statusText: "未选择",
+    statusTone: "idle",
+  });
+});
+
+test("describeCommandCenterHero returns status-aware copy for selected tunnels", () => {
+  const statuses = [
+    { status: "idle", expected: { text: "空闲", tone: "idle" } },
+    { status: "connected", expected: { text: "已连接", tone: "connected" } },
+    { status: "error", expected: { text: "错误", tone: "error" } },
+  ];
+
+  for (const { status, expected } of statuses) {
+    const hero = describeCommandCenterHero(sampleTunnel(status));
+    assert.equal(hero.statusText, expected.text);
+    assert.equal(hero.statusTone, expected.tone);
+    assert.equal(hero.title, "Database");
+    assert.equal(hero.subtitle, "deploy@bastion.example.com");
+  }
+});
+
+test("describeCommandCenterCards returns empty copy before selection", () => {
+  assert.deepEqual(describeCommandCenterCards(null), {
+    forwardLabel: "本地转发",
+    forwardValue: "选择隧道后显示转发目标",
+    authLabel: "认证方式",
+    authValue: "选择隧道后显示认证方式",
+    healthLabel: "连接健康",
+    healthValue: "无数据",
+  });
+});
+
+test("describeCommandCenterCards returns forward/auth/health copy", () => {
+  const cards = describeCommandCenterCards(sampleTunnel("connected"));
+  assert.deepEqual(cards, {
+    forwardLabel: "本地转发",
+    forwardValue: "127.0.0.1:15432 -> 10.0.0.12:5432",
+    authLabel: "认证方式",
+    authValue: "密钥认证",
+    healthLabel: "连接健康",
+    healthValue: "自动重连: 开启",
+  });
+});
+
+test("describeCommandCenterCards surfaces reconnect detail for errors", () => {
+  const cards = describeCommandCenterCards(sampleTunnel("error"));
+  assert.deepEqual(cards, {
+    forwardLabel: "本地转发",
+    forwardValue: "127.0.0.1:15432 -> 10.0.0.12:5432",
+    authLabel: "认证方式",
+    authValue: "密钥认证",
+    healthLabel: "连接健康",
+    healthValue: "错误 — ssh exited with status code 7",
+  });
+});
+
+test("describeCommandCenterCards keeps reconnect details visible for error tunnels", () => {
+  const tunnel = sampleTunnel("error");
+  tunnel.definition.auth_kind = "password";
+  tunnel.definition.auto_reconnect = false;
+
+  assert.deepEqual(describeCommandCenterCards(tunnel), {
+    forwardLabel: "本地转发",
+    forwardValue: "127.0.0.1:15432 -> 10.0.0.12:5432",
+    authLabel: "认证方式",
+    authValue: "密码认证",
+    healthLabel: "连接健康",
+    healthValue: "错误 — ssh exited with status code 7",
+  });
+});
+
+test("describeCommandCenterTimeline summarizes status events and ssh output", () => {
+  const summary = describeCommandCenterTimeline([
+    "spawned ssh process pid=123",
+    "password sent to interactive ssh session",
+    "channel 0: open failed: Connection refused",
+  ]);
+
+  assert.equal(summary.summaryText, "最近 2 条状态事件，1 条 SSH 输出");
+  assert.equal(summary.statusEvents.length, 2);
+  assert.equal(summary.sshOutput.length, 1);
 });

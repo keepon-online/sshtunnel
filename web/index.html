@@ -8,16 +8,21 @@
 </head>
 <body>
   <div class="shell">
-    <aside class="sidebar">
-      <div class="brand-block">
+    <aside class="control-column">
+      <section class="brand-card">
         <p class="eyebrow">托盘优先 SSH 隧道</p>
         <h1>SSH 隧道管理器</h1>
-        <p class="muted">轻量、可托盘化的本地端口转发工具。常用操作留在托盘，主窗口专注查看状态、日志和编辑配置。</p>
-      </div>
-      <div class="sidebar-actions">
+        <p class="muted">
+          主窗口聚焦连接状态、诊断时间线和配置编辑。高频操作依然优先走托盘。
+        </p>
+      </section>
+
+      <div class="control-actions">
         <button id="new-tunnel">新建隧道</button>
       </div>
-      <div class="meta-card">
+
+      <section class="meta-card">
+        <p class="eyebrow">全局状态</p>
         <div class="meta-row compact">
           <span>系统 SSH</span>
           <strong id="ssh-status">检查中</strong>
@@ -31,67 +36,79 @@
           <code id="config-path">-</code>
         </div>
         <button id="autostart-toggle" type="button" class="secondary meta-button">检查中</button>
-      </div>
-      <div class="list-section">
-        <div class="section-head">
+      </section>
+
+      <section class="list-section">
+        <div class="list-head">
           <div>
             <p class="eyebrow">隧道</p>
             <h2>隧道列表</h2>
           </div>
         </div>
         <div id="tunnel-list" class="tunnel-list"></div>
-      </div>
+      </section>
     </aside>
 
-    <main class="workspace">
-      <section class="panel workspace-panel">
-        <div class="workspace-head">
-          <div>
-            <p class="eyebrow">工作区</p>
-            <h2 id="workspace-title">选择一个隧道</h2>
-            <p id="workspace-subtitle" class="muted workspace-subtitle">从左侧选择现有隧道，或创建一个新的本地转发配置。</p>
-          </div>
-          <div class="actions workspace-actions">
-            <button id="connect-btn">连接</button>
-            <button id="disconnect-btn" class="secondary">断开</button>
-            <button id="edit-btn" class="secondary">编辑</button>
-            <button id="delete-btn" class="danger">删除</button>
-          </div>
-        </div>
-        <div class="workspace-grid">
-          <div class="summary-grid">
-            <article class="summary-card primary-summary-card">
-              <p id="status-label" class="eyebrow">连接状态</p>
-              <div id="status-card" class="status-card idle">未选择</div>
-              <div id="status-subtitle" class="status-subtitle muted">从左侧选择现有隧道，或创建一个新的本地转发配置。</div>
-              <div id="status-error" class="status-error hidden"></div>
-            </article>
-            <article class="summary-card">
-              <p id="forward-label" class="eyebrow">本地转发</p>
-              <div id="forward-card" class="summary-value muted">选择隧道后显示转发目标</div>
-            </article>
-            <article class="summary-card">
-              <p id="auth-label" class="eyebrow">认证方式</p>
-              <div id="auth-card" class="summary-value muted">选择隧道后显示认证方式</div>
-              <div id="auth-meta" class="summary-meta"></div>
-            </article>
-          </div>
-          <div class="detail-card">
-            <p class="eyebrow">故障排查</p>
-            <h3>最近日志</h3>
-            <p id="log-summary" class="muted log-summary">暂无最近日志</p>
-            <div class="log-sections">
-              <section class="log-section">
-                <div class="log-section-head">状态事件</div>
-                <div id="status-events-log" class="log-panel"></div>
-              </section>
-              <section class="log-section">
-                <div class="log-section-head">SSH 输出</div>
-                <div id="ssh-output-log" class="log-panel"></div>
-              </section>
+    <main class="command-center">
+      <section class="workspace-panel">
+        <section class="hero-card">
+          <div class="hero-top">
+            <div class="hero-copy">
+              <p class="eyebrow">当前隧道</p>
+              <h2 id="workspace-title">选择一个隧道</h2>
+              <p id="workspace-subtitle" class="workspace-subtitle muted">从左侧选择现有隧道，或创建一个新的本地转发配置。</p>
+            </div>
+            <div class="actions workspace-actions">
+              <button id="connect-btn">连接</button>
+              <button id="disconnect-btn" class="secondary">断开</button>
+              <button id="edit-btn" class="secondary">编辑</button>
+              <button id="delete-btn" class="danger">删除</button>
             </div>
           </div>
-        </div>
+          <div class="hero-status">
+            <p id="status-label" class="eyebrow">连接状态</p>
+            <div id="status-card" class="status-card idle">未选择</div>
+          </div>
+        </section>
+
+        <section class="support-grid">
+          <article class="support-card">
+            <p id="forward-label" class="eyebrow">本地转发</p>
+            <div id="forward-card" class="summary-value muted">选择隧道后显示转发目标</div>
+          </article>
+
+          <article class="support-card">
+            <p id="auth-label" class="eyebrow">认证方式</p>
+            <div id="auth-card" class="summary-value muted">选择隧道后显示认证方式</div>
+            <div id="auth-meta" class="summary-meta"></div>
+          </article>
+
+          <article class="support-card">
+            <p class="eyebrow">连接健康</p>
+            <div id="status-subtitle" class="status-subtitle muted">从左侧选择现有隧道，或创建一个新的本地转发配置。</div>
+            <div id="status-error" class="status-error hidden"></div>
+          </article>
+        </section>
+
+        <section class="timeline-card">
+          <div class="timeline-head">
+            <div>
+              <p class="eyebrow">故障排查</p>
+              <h3>连接时间线</h3>
+            </div>
+            <p id="log-summary" class="muted log-summary">暂无最近日志</p>
+          </div>
+          <div class="timeline-grid">
+            <section class="timeline-lane">
+              <div class="timeline-lane-head">状态事件</div>
+              <div id="status-events-log" class="log-panel"></div>
+            </section>
+            <section class="timeline-lane">
+              <div class="timeline-lane-head">SSH 输出</div>
+              <div id="ssh-output-log" class="log-panel"></div>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
   </div>

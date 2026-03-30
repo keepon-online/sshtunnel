@@ -22,9 +22,11 @@
 - Frontend shell exists with tunnel list, form, runtime status, recent log, and autostart toggle.
 - Frontend view-model tests now cover snapshot meta, tunnel status copy, and connect/disconnect action states.
 - Frontend list-rendering tests now cover item copy, localized badges, and active selection state.
-- Main window now uses a desktop-style left-list/right-workspace layout with drawer-based editing.
-- Workspace summary cards now surface connection state, forwarding details, auth mode, and inline error summaries.
-- Workspace log panel now groups status events and SSH output with error highlighting.
+- Main window now uses a command-center desktop shell with a compact left control column, dominant status hero, supporting cards, and drawer-based editing.
+- Frontend command-center view-model tests now cover hero copy, support-card copy, and timeline summaries.
+- Frontend app helper tests now cover command-center render-model behavior, including error and fallback health messaging.
+- Workspace summary cards now surface connection state, forwarding details, auth mode, and reconnect/error summaries.
+- Workspace log panel now uses a timeline-style diagnostic layout for status events and SSH output.
 - Backend runtime tests now cover recent-log trimming, exit-state handling, and disconnect cleanup.
 - Backend save/delete command helpers now have coverage for mutation order, auth-field normalization, runtime cleanup, and config persistence.
 - Backend connect/disconnect/autostart command helpers now have coverage for missing credentials, runtime replacement, disconnect idempotence, recent-order updates, and autostart branch selection.

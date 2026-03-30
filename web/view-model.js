@@ -204,6 +204,45 @@
     };
   }
 
+  function describeCommandCenterHero(tunnel) {
+    return describeWorkspacePanel(tunnel);
+  }
+
+  function describeCommandCenterCards(tunnel) {
+    if (!tunnel) {
+      return {
+        forwardLabel: "本地转发",
+        forwardValue: "选择隧道后显示转发目标",
+        authLabel: "认证方式",
+        authValue: "选择隧道后显示认证方式",
+        healthLabel: "连接健康",
+        healthValue: "无数据",
+      };
+    }
+
+    const definition = tunnel.definition ?? {};
+    const forwardValue = `${definition.local_bind_address ?? ""}:${definition.local_bind_port ?? ""} -> ${definition.remote_host ?? ""}:${definition.remote_port ?? ""}`;
+
+    const statusCopy = describeTunnelStatus(tunnel.status);
+    const healthValue =
+      tunnel.status === "error"
+        ? `错误 — ${tunnel.last_error ?? statusCopy.text}`
+        : `自动重连: ${definition.auto_reconnect ? "开启" : "关闭"}`;
+
+    return {
+      forwardLabel: "本地转发",
+      forwardValue,
+      authLabel: "认证方式",
+      authValue: definition.auth_kind === "password" ? "密码认证" : "密钥认证",
+      healthLabel: "连接健康",
+      healthValue,
+    };
+  }
+
+  function describeCommandCenterTimeline(lines) {
+    return describeDiagnosticLogPanel(lines);
+  }
+
   function summarizeSnapshotMeta(snapshot) {
     const autostart = describeAutostart(Boolean(snapshot?.autostart_enabled));
 
@@ -225,5 +264,8 @@
     describeStatusSummaryCards,
     describeWorkspacePanel,
     summarizeSnapshotMeta,
+    describeCommandCenterHero,
+    describeCommandCenterCards,
+    describeCommandCenterTimeline,
   };
 });

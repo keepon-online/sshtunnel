@@ -133,18 +133,78 @@
     return null;
   }
 
+  function buildCommandCenterView(tunnel, hero, cards, timeline) {
+    const hasTunnel = Boolean(tunnel);
+    const statusTone = hero?.statusTone ?? "idle";
+    const isError = hasTunnel && statusTone === "error";
+
+    return {
+      title: hero?.title ?? "选择一个隧道",
+      subtitle: hero?.subtitle ?? "从左侧选择现有隧道，或创建一个新的本地转发配置。",
+      statusLabel: "连接状态",
+      statusTone,
+      statusText: hero?.statusText ?? "未选择",
+      forwardLabel: cards?.forwardLabel ?? "本地转发",
+      forwardText: cards?.forwardValue ?? "选择隧道后显示转发目标",
+      forwardMuted: !hasTunnel,
+      authLabel: cards?.authLabel ?? "认证方式",
+      authText: cards?.authValue ?? "选择隧道后显示认证方式",
+      authMuted: !hasTunnel,
+      authMeta: cards?.authMeta ?? "",
+      healthText: isError ? "连接异常，请处理后重试。" : cards?.healthValue ?? "无数据",
+      healthError: isError ? cards?.healthValue ?? "" : "",
+      logSummary: timeline?.summaryText ?? "暂无最近日志",
+      statusEvents: hasTunnel ? timeline?.statusEvents ?? [] : [],
+      sshOutput: hasTunnel ? timeline?.sshOutput ?? [] : [],
+      emptyStatusText: hasTunnel
+        ? timeline?.emptyStatusText ?? "暂无状态事件"
+        : "从左侧选择一条隧道后显示状态事件。",
+      emptySshText: hasTunnel
+        ? timeline?.emptySshText ?? "暂无 SSH 输出"
+        : "从左侧选择一条隧道后显示 SSH 输出。",
+    };
+  }
+
+  function mapStatusSummaryToCommandCenterCards(summary) {
+    const reconnectText = summary?.authMeta || "无数据";
+    const errorText = summary?.errorText || "";
+
+    return {
+      forwardLabel: summary?.forwardLabel,
+      forwardValue: summary?.forwardText,
+      authLabel: summary?.authLabel,
+      authValue: summary?.authText,
+      authMeta: summary?.authMeta,
+      healthLabel: "连接健康",
+      healthValue: errorText ? `错误 — ${errorText}` : reconnectText,
+    };
+  }
+
   function bootstrap(host, document) {
     const bridge = createDesktopBridge(host);
     const invoke = (command, args = {}) => bridge.invoke(command, args);
     const {
       describeTunnelActions,
       describeTunnelListItem,
-      describeDiagnosticLogPanel,
       describeEditorSheet,
-      describeStatusSummaryCards,
       describeWorkspacePanel,
+      describeStatusSummaryCards,
+      describeDiagnosticLogPanel,
+      describeCommandCenterHero: viewModelDescribeCommandCenterHero,
+      describeCommandCenterCards: viewModelDescribeCommandCenterCards,
+      describeCommandCenterTimeline: viewModelDescribeCommandCenterTimeline,
       summarizeSnapshotMeta,
     } = host.SshTunnelViewModel;
+
+    const describeCommandCenterHero = viewModelDescribeCommandCenterHero ?? describeWorkspacePanel;
+    const describeCommandCenterCards =
+      viewModelDescribeCommandCenterCards ??
+      ((tunnel) => {
+        const summary = describeStatusSummaryCards(tunnel);
+        return mapStatusSummaryToCommandCenterCards(summary);
+      });
+    const describeCommandCenterTimeline =
+      viewModelDescribeCommandCenterTimeline ?? describeDiagnosticLogPanel;
 
     const state = {
       snapshot: null,
@@ -223,37 +283,31 @@
     }
 
     function renderWorkspace(tunnel) {
-      const workspace = describeWorkspacePanel(tunnel);
-      const summary = describeStatusSummaryCards(tunnel);
-      const logPanel = describeDiagnosticLogPanel(tunnel?.recent_log ?? []);
-      refs.workspaceTitle.textContent = workspace.title;
-      refs.workspaceSubtitle.textContent = workspace.subtitle;
-      refs.statusLabel.textContent = summary.primaryLabel;
-      refs.statusCard.className = `status-card ${summary.primaryTone}`;
-      refs.statusCard.textContent = summary.primaryText;
-      refs.statusSubtitle.textContent = summary.primarySubtitle;
-      refs.forwardLabel.textContent = summary.forwardLabel;
-      refs.forwardCard.textContent = summary.forwardText;
-      refs.authLabel.textContent = summary.authLabel;
-      refs.authCard.textContent = summary.authText;
-      refs.authMeta.textContent = summary.authMeta;
-      refs.authMeta.classList.toggle("hidden", !summary.authMeta);
-      refs.statusError.textContent = summary.errorText;
-      refs.statusError.classList.toggle("hidden", !summary.errorText);
-      refs.logSummary.textContent = logPanel.summaryText;
+      const hero = describeCommandCenterHero(tunnel);
+      const cards = describeCommandCenterCards(tunnel);
+      const timeline = describeCommandCenterTimeline(tunnel?.recent_log ?? []);
+      const view = buildCommandCenterView(tunnel, hero, cards, timeline);
 
-      if (!tunnel) {
-        refs.forwardCard.className = "summary-value muted";
-        refs.authCard.className = "summary-value muted";
-        renderLogSection(refs.statusEventsLog, [], "从左侧选择一条隧道后显示状态事件。");
-        renderLogSection(refs.sshOutputLog, [], "从左侧选择一条隧道后显示 SSH 输出。");
-        return;
-      }
+      refs.workspaceTitle.textContent = view.title;
+      refs.workspaceSubtitle.textContent = view.subtitle;
+      refs.statusLabel.textContent = view.statusLabel;
+      refs.statusCard.className = `status-card ${view.statusTone}`;
+      refs.statusCard.textContent = view.statusText;
+      refs.statusSubtitle.textContent = view.healthText;
+      refs.statusError.textContent = view.healthError;
+      refs.statusError.classList.toggle("hidden", !view.healthError);
+      refs.forwardLabel.textContent = view.forwardLabel;
+      refs.forwardCard.textContent = view.forwardText;
+      refs.forwardCard.className = view.forwardMuted ? "summary-value muted" : "summary-value";
+      refs.authLabel.textContent = view.authLabel;
+      refs.authCard.textContent = view.authText;
+      refs.authCard.className = view.authMuted ? "summary-value muted" : "summary-value";
+      refs.authMeta.textContent = view.authMeta;
+      refs.authMeta.classList.toggle("hidden", !view.authMeta);
+      refs.logSummary.textContent = view.logSummary;
 
-      refs.forwardCard.className = "summary-value";
-      refs.authCard.className = "summary-value";
-      renderLogSection(refs.statusEventsLog, logPanel.statusEvents, logPanel.emptyStatusText);
-      renderLogSection(refs.sshOutputLog, logPanel.sshOutput, logPanel.emptySshText);
+      renderLogSection(refs.statusEventsLog, view.statusEvents, view.emptyStatusText);
+      renderLogSection(refs.sshOutputLog, view.sshOutput, view.emptySshText);
     }
 
     function fillForm(tunnel) {
@@ -485,6 +539,8 @@
   }
 
   return {
+    buildCommandCenterView,
+    mapStatusSummaryToCommandCenterCards,
     DESKTOP_ONLY_MESSAGE,
     bootstrap,
     clearEditorError,
