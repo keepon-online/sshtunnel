@@ -3,6 +3,9 @@ mod tray_model;
 #[cfg(test)]
 mod tray_model_tests;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use std::{
     collections::HashMap,
     fs,
@@ -10,6 +13,9 @@ use std::{
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use keyring::Entry;
 use managed_process::ManagedProcess;
@@ -270,11 +276,15 @@ fn persist_config(path: &PathBuf, tunnels: &[TunnelDefinition]) -> Result<(), St
 }
 
 fn ensure_ssh_available() -> Result<(), String> {
-    std::process::Command::new("ssh")
-        .arg("-V")
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.arg("-V")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    cmd.status()
         .map_err(|_| "system ssh binary was not found in PATH".to_string())
         .and_then(|status| {
             if status.success() {
