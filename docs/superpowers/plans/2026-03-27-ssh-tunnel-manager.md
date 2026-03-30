@@ -31,12 +31,13 @@
 - Tray disconnect-all flow now has helper coverage for batch disconnect, idle safety, and recent-order updates.
 - Tray menu now rebuilds dynamically with recent tunnel quick actions for direct connect/disconnect.
 - Desktop editor flow now guards Tauri bridge access, shows inline drawer save errors, and supports private-key file picking via the dialog plugin.
+- Windows release build now uses the GUI subsystem entrypoint, so starting tunnels no longer shows a `cmd` black window in the packaged app.
 - Packaging and CI are set up: local `cargo tauri build` support, Ubuntu verification workflow, Linux `.deb` artifact upload, and Windows installer workflow artifact upload.
+- Windows packaged build has now been real-machine verified for normal tunnel startup behavior.
 
 ### Remaining Backlog
 
 - Add deeper integration coverage only where helper-level tests are still insufficient.
-- Verify password-auth execution on a real Windows machine.
 
 ---
 

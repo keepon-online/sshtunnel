@@ -4,7 +4,7 @@
 
 **Goal:** Stop the Windows build from showing a console window when SSH tunnels are started, for both native and password-prompt launch paths.
 
-**Architecture:** Keep process launching in the current backend, add a tiny Windows-only helper for native `Command` creation flags, and patch the local `portable-pty` Windows spawn code so both code paths request `CREATE_NO_WINDOW`. Preserve the existing SSH launch plan and runtime logging behavior.
+**Architecture:** Keep the existing hidden SSH child-process behavior, hide the Windows app console at the Tauri binary entrypoint with `windows_subsystem = "windows"`, and lock that behavior with a regression test in `src-tauri/src/main.rs`.
 
 **Tech Stack:** Rust, Tauri 2, system OpenSSH, portable-pty
 
@@ -12,64 +12,62 @@
 
 ## File Structure
 
-- Modify: `Cargo.toml`
-- Modify: `src-tauri/src/managed_process.rs`
-- Create: `vendor/portable-pty/...`
+- Modify: `src-tauri/src/main.rs`
 - Create: `docs/superpowers/specs/2026-03-30-windows-hide-ssh-console-design.md`
 - Create: `docs/superpowers/plans/2026-03-30-windows-hide-ssh-console.md`
 
-## Chunk 1: Failing Test For Windows Spawn Flags
+## Chunk 1: Failing Test For Windows GUI Subsystem
 
 ### Task 1: Add the helper test
 
 **Files:**
-- Modify: `src-tauri/src/managed_process.rs`
+- Modify: `src-tauri/src/main.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
-Add a unit test for a small helper that returns the process creation flags used for hidden Windows SSH child processes.
+Add a unit test in `src-tauri/src/main.rs` that asserts the source contains `windows_subsystem = "windows"`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
-- `/home/top/.cargo/bin/cargo test -p sshtunnel-app managed_process`
+- `/home/top/.cargo/bin/cargo test -p sshtunnel-app --bin sshtunnel-app tests::windows_release_build_uses_gui_subsystem -- --exact`
 
-Expected: FAIL because the helper does not exist yet.
+Expected: FAIL because the subsystem attribute does not exist yet.
 
-## Chunk 2: Native SSH No-Window Launch
+## Chunk 2: Windows Release GUI Subsystem
 
-### Task 2: Implement the native Windows no-window helper
+### Task 2: Implement the Tauri entrypoint fix
 
 **Files:**
-- Modify: `src-tauri/src/managed_process.rs`
+- Modify: `src-tauri/src/main.rs`
 
-- [ ] **Step 1: Write minimal implementation**
+- [x] **Step 1: Write minimal implementation**
 
-Add a Windows-only helper that applies `CREATE_NO_WINDOW` to `std::process::Command`, and call it from the native launch path before spawning `ssh`.
+Add `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` to the Tauri binary entrypoint.
 
-- [ ] **Step 2: Run targeted verification**
+- [x] **Step 2: Run targeted verification**
 
 Run:
-- `/home/top/.cargo/bin/cargo test -p sshtunnel-app managed_process`
+- `/home/top/.cargo/bin/cargo test -p sshtunnel-app --bin sshtunnel-app tests::windows_release_build_uses_gui_subsystem -- --exact`
 
 Expected: PASS.
 
-## Chunk 3: Prompted Password No-Window Launch
+## Chunk 3: Full Verification
 
-### Task 3: Patch portable-pty for Windows
+### Task 3: Verify release behavior and document outcome
 
 **Files:**
-- Modify: `Cargo.toml`
-- Create/Modify: `vendor/portable-pty/...`
+- Modify: `README.md`
+- Modify: `docs/superpowers/specs/2026-03-30-windows-hide-ssh-console-design.md`
+- Modify: `docs/superpowers/plans/2026-03-27-ssh-tunnel-manager.md`
 
-- [ ] **Step 1: Vendor the dependency and patch Windows process creation flags**
-
-Add a local `[patch.crates-io]` override for `portable-pty` and include `CREATE_NO_WINDOW` in its Windows `CreateProcessW` flags.
-
-- [ ] **Step 2: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run:
-- `/home/top/.cargo/bin/cargo test -p sshtunnel-app managed_process`
-- `/home/top/.cargo/bin/cargo check -p sshtunnel-app`
+- `/home/top/.cargo/bin/cargo test -p sshtunnel-app`
+
+- [x] **Step 2: Confirm packaged Windows behavior**
+
+Confirm on a real Windows packaged build that tunnel launch no longer shows a black console window and that connection behavior remains normal.
 
 Expected: PASS.
