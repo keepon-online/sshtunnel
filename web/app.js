@@ -86,6 +86,53 @@
     return visibilityState === "visible" && !state?.editorOpen;
   }
 
+  function hasText(value) {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+
+  function isValidPort(value) {
+    return Number.isInteger(value) && value >= 1 && value <= 65535;
+  }
+
+  function validateTunnelPayload(payload) {
+    const tunnel = payload?.tunnel ?? {};
+    const requiredFields = [
+      [tunnel.name, "请输入名称。"],
+      [tunnel.ssh_host, "请输入 SSH 主机。"],
+      [tunnel.username, "请输入用户名。"],
+      [tunnel.local_bind_address, "请输入本地监听地址。"],
+      [tunnel.remote_host, "请输入远端目标主机。"],
+    ];
+
+    for (const [value, message] of requiredFields) {
+      if (!hasText(value)) {
+        return message;
+      }
+    }
+
+    if (!isValidPort(tunnel.ssh_port)) {
+      return "请输入有效的 SSH 端口。";
+    }
+
+    if (!isValidPort(tunnel.local_bind_port)) {
+      return "请输入有效的本地端口。";
+    }
+
+    if (!isValidPort(tunnel.remote_port)) {
+      return "请输入有效的远端目标端口。";
+    }
+
+    if (tunnel.auth_kind === "private_key" && !hasText(tunnel.private_key_path ?? "")) {
+      return "请选择私钥文件，或手动填写私钥路径。";
+    }
+
+    if (tunnel.auth_kind === "password" && !hasText(payload?.password ?? "")) {
+      return "请输入密码。";
+    }
+
+    return null;
+  }
+
   function bootstrap(host, document) {
     const bridge = createDesktopBridge(host);
     const invoke = (command, args = {}) => bridge.invoke(command, args);
@@ -349,6 +396,13 @@
 
       try {
         const payload = formPayload();
+        const validationError = validateTunnelPayload(payload);
+
+        if (validationError) {
+          setEditorError(refs, validationError);
+          return;
+        }
+
         state.snapshot = await invoke("save_tunnel", { payload });
         const savedId = payload.tunnel.id || state.snapshot.tunnels.at(-1)?.definition.id;
         state.selectedId =
@@ -439,5 +493,6 @@
     normalizeDialogSelection,
     shouldRefreshSnapshot,
     setEditorError,
+    validateTunnelPayload,
   };
 });

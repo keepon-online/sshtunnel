@@ -7,6 +7,7 @@ const {
   fillPrivateKeyPath,
   shouldRefreshSnapshot,
   setEditorError,
+  validateTunnelPayload,
 } = require("../app.js");
 
 function fakeMessageNode() {
@@ -67,4 +68,24 @@ test("shouldRefreshSnapshot pauses auto refresh while the editor drawer is open"
   assert.equal(shouldRefreshSnapshot({ editorOpen: true }, "visible"), false);
   assert.equal(shouldRefreshSnapshot({ editorOpen: false }, "visible"), true);
   assert.equal(shouldRefreshSnapshot({ editorOpen: false }, "hidden"), false);
+});
+
+test("validateTunnelPayload returns the first Chinese error for an empty tunnel form", () => {
+  const message = validateTunnelPayload({
+    tunnel: {
+      name: "",
+      ssh_host: "",
+      ssh_port: 22,
+      username: "",
+      local_bind_address: "",
+      local_bind_port: 15432,
+      remote_host: "",
+      remote_port: 5432,
+      auth_kind: "private_key",
+      private_key_path: null,
+    },
+    password: null,
+  });
+
+  assert.equal(message, "请输入名称。");
 });
