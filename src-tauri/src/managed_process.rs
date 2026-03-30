@@ -5,8 +5,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use sshtunnel_core::ssh_launch::{CommandSpec, LaunchPlan};
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub struct ManagedProcess {
     inner: ManagedProcessInner,
@@ -94,6 +100,7 @@ impl ManagedProcess {
         child.stdin(Stdio::null());
         child.stdout(Stdio::null());
         child.stderr(Stdio::piped());
+        apply_hidden_process_creation(&mut child);
 
         let mut child = child.spawn().map_err(|error| error.to_string())?;
         let stderr = child
@@ -197,6 +204,31 @@ impl ManagedProcess {
     }
 }
 
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+fn windows_process_creation_flags() -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        CREATE_NO_WINDOW
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        0
+    }
+}
+
+fn apply_hidden_process_creation(command: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(windows_process_creation_flags());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = command;
+    }
+}
+
 fn spawn_native_stderr_reader(
     stderr: impl Read + Send + 'static,
     logs: Arc<Mutex<Vec<String>>>,
@@ -241,7 +273,7 @@ mod tests {
 
     use sshtunnel_core::ssh_launch::{CommandSpec, LaunchPlan};
 
-    use super::ManagedProcess;
+    use super::{windows_process_creation_flags, ManagedProcess};
 
     #[test]
     fn native_process_captures_stderr_lines() {
@@ -275,6 +307,15 @@ mod tests {
             lines.iter().any(|line| line.contains("stderr-second")),
             "expected stderr-second in logs, got {lines:?}"
         );
+    }
+
+    #[test]
+    fn windows_process_creation_flags_match_platform_behavior() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(windows_process_creation_flags(), 0x0800_0000);
+
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(windows_process_creation_flags(), 0);
     }
 
     #[cfg(target_os = "windows")]
