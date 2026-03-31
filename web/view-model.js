@@ -198,6 +198,8 @@
       "permission",
     ];
 
+    const isSshDebugLine = (text) => /^debug[123]:/i.test(text);
+
     const toEntry = (text) => ({
       text,
       tone: errorPatterns.some((pattern) => text.toLowerCase().includes(pattern))
@@ -209,11 +211,10 @@
     const sshOutput = [];
 
     for (const line of logLines) {
+      if (isSshDebugLine(line)) continue;
       const lower = line.toLowerCase();
       if (line.startsWith("[测试状态]") || statusPatterns.some((pattern) => lower.includes(pattern))) {
         statusEvents.push(toEntry(line));
-      } else if (line.startsWith("[测试输出]")) {
-        sshOutput.push(toEntry(line));
       } else {
         sshOutput.push(toEntry(line));
       }
