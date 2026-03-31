@@ -59,6 +59,7 @@ impl ManagedProcess {
             ManagedProcessInner::Native(child) => {
                 let status = child.child.try_wait().map_err(|error| error.to_string())?;
                 if status.is_some() {
+                    let _ = child.child.wait();
                     join_reader(&mut child.reader_thread);
                 }
                 Ok(status.map(|item| format!("{item}")))
@@ -66,6 +67,7 @@ impl ManagedProcess {
             ManagedProcessInner::Prompted(child) => {
                 let status = child.child.try_wait().map_err(|error| error.to_string())?;
                 if status.is_some() {
+                    let _ = child.child.wait();
                     join_reader(&mut child.reader_thread);
                 }
                 Ok(status.map(|item| format!("{item:?}")))
@@ -412,6 +414,39 @@ mod tests {
     }
 
     #[test]
+    fn prompted_try_wait_returns_promptly_after_process_exits() {
+        let mut process = ManagedProcess::spawn(LaunchPlan::PromptedPassword {
+            command: promptless_exit_command(),
+            password: "s3cr3t".into(),
+            prompt: "assword:".into(),
+        })
+        .expect("spawn promptly exiting prompted process");
+        let deadline = Instant::now() + Duration::from_secs(2);
+
+        loop {
+            let before = Instant::now();
+            let status = process.try_wait().expect("query child status");
+            let elapsed = before.elapsed();
+
+            assert!(
+                elapsed < Duration::from_millis(500),
+                "try_wait blocked for {elapsed:?}"
+            );
+
+            if status.is_some() {
+                break;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "process did not exit promptly; logs={:?}",
+                process.take_logs()
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    #[test]
     fn windows_process_creation_flags_match_platform_behavior() {
         #[cfg(target_os = "windows")]
         assert_eq!(windows_process_creation_flags(), 0x0800_0000);
@@ -462,6 +497,22 @@ mod tests {
                 "-c".into(),
                 "printf 'Password:'; read pass; printf 'RECEIVED:%s\\n' \"$pass\"".into(),
             ],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn promptless_exit_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec!["/C".into(), "echo promptless failure 1>&2 & exit /b 1".into()],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn promptless_exit_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "echo 'promptless failure' >&2; exit 1".into()],
         }
     }
 }
