@@ -24,6 +24,9 @@ pub fn build_ssh_args(tunnel: &TunnelDefinition) -> Vec<String> {
             }
         }
         AuthKind::Password => {
+            args.push("-v".to_string());
+            args.push("-o".to_string());
+            args.push("StrictHostKeyChecking=accept-new".to_string());
             args.push("-o".to_string());
             args.push("PreferredAuthentications=password".to_string());
             args.push("-o".to_string());

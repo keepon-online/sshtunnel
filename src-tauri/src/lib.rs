@@ -11,7 +11,8 @@ use std::{
     fs,
     path::PathBuf,
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(target_os = "windows")]
@@ -89,6 +90,8 @@ struct TunnelRuntime {
     process: Option<ManagedProcess>,
     last_error: Option<String>,
     recent_log: Vec<String>,
+    disconnect_requested: bool,
+    reconnect_pending: bool,
 }
 
 impl Default for TunnelRuntime {
@@ -97,6 +100,8 @@ impl Default for TunnelRuntime {
             process: None,
             last_error: None,
             recent_log: Vec::new(),
+            disconnect_requested: false,
+            reconnect_pending: false,
         }
     }
 }
@@ -141,6 +146,7 @@ fn save_tunnel(
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
     let tunnel = prepare_tunnel_for_save(payload.tunnel)?;
+    ensure_password_credential_for_save(&tunnel, payload.password.as_deref(), get_password)?;
 
     {
         let mut inner = state
@@ -198,15 +204,7 @@ fn connect_tunnel(
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
-    let prepared = match prepare_connect_request(&mut inner, &id, get_password)? {
-        ConnectPreparation::Launch(prepared) => prepared,
-        ConnectPreparation::MissingCredential => {
-            return snapshot_from_inner(&state.config_path, &app, &mut inner);
-        }
-    };
-    let plan = build_launch_plan(&prepared.tunnel, prepared.password.as_deref())?;
-    let process = ManagedProcess::spawn(plan)?;
-    apply_connected_runtime(&mut inner, &id, process);
+    launch_tunnel(&mut inner, &id, get_password)?;
 
     refresh_tray_menu(&app, &inner)?;
     snapshot_from_inner(&state.config_path, &app, &mut inner)
@@ -361,6 +359,28 @@ fn prepare_tunnel_for_save(mut tunnel: TunnelDefinition) -> Result<TunnelDefinit
     Ok(tunnel)
 }
 
+fn ensure_password_credential_for_save<F>(
+    tunnel: &TunnelDefinition,
+    password: Option<&str>,
+    load_password: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&str) -> Result<String, String>,
+{
+    if tunnel.auth_kind != AuthKind::Password {
+        return Ok(());
+    }
+
+    if password.is_some_and(|value| !value.trim().is_empty()) {
+        return Ok(());
+    }
+
+    match load_password(&tunnel.id) {
+        Ok(existing) if !existing.trim().is_empty() => Ok(()),
+        _ => Err("password auth requires a password or an existing stored credential".into()),
+    }
+}
+
 fn prepare_connect_request<F>(
     inner: &mut InnerState,
     id: &str,
@@ -400,11 +420,87 @@ where
     }
 }
 
+fn launch_tunnel<F>(inner: &mut InnerState, id: &str, load_password: F) -> Result<(), String>
+where
+    F: FnOnce(&str) -> Result<String, String>,
+{
+    let prepared = match prepare_connect_request(inner, id, load_password)? {
+        ConnectPreparation::Launch(prepared) => prepared,
+        ConnectPreparation::MissingCredential => return Ok(()),
+    };
+    let plan = build_launch_plan(&prepared.tunnel, prepared.password.as_deref())?;
+    let process = ManagedProcess::spawn(plan)?;
+    apply_connected_runtime(inner, id, process);
+    Ok(())
+}
+
+fn collect_auto_connect_ids(tunnels: &[TunnelDefinition]) -> Vec<String> {
+    tunnels
+        .iter()
+        .filter(|tunnel| tunnel.auto_connect)
+        .map(|tunnel| tunnel.id.clone())
+        .collect()
+}
+
+fn collect_pending_reconnect_ids(inner: &InnerState) -> Vec<String> {
+    inner
+        .tunnels
+        .iter()
+        .filter(|tunnel| tunnel.auto_reconnect)
+        .filter_map(|tunnel| {
+            inner
+                .runtimes
+                .get(&tunnel.id)
+                .filter(|runtime| {
+                    runtime.reconnect_pending
+                        && !runtime.disconnect_requested
+                        && runtime.process.is_none()
+                })
+                .map(|_| tunnel.id.clone())
+        })
+        .collect()
+}
+
+fn apply_startup_auto_connect(inner: &mut InnerState) {
+    for id in collect_auto_connect_ids(&inner.tunnels) {
+        let _ = launch_tunnel(inner, &id, get_password);
+    }
+}
+
+fn maintain_runtime_connections(inner: &mut InnerState) {
+    let ids: Vec<String> = inner.tunnels.iter().map(|tunnel| tunnel.id.clone()).collect();
+    for id in ids {
+        if let Some(runtime) = inner.runtimes.get_mut(&id) {
+            let _ = refresh_runtime(runtime);
+        }
+    }
+
+    for id in collect_pending_reconnect_ids(inner) {
+        if let Some(runtime) = inner.runtimes.get_mut(&id) {
+            runtime.reconnect_pending = false;
+        }
+        let _ = launch_tunnel(inner, &id, get_password);
+    }
+}
+
+fn spawn_runtime_maintenance_loop(app: tauri::AppHandle) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(1));
+        let state = app.state::<AppState>();
+        if let Ok(mut inner) = state.inner.lock() {
+            maintain_runtime_connections(&mut inner);
+            let _ = refresh_tray_menu(&app, &inner);
+        };
+    });
+}
+
 fn apply_connected_runtime(inner: &mut InnerState, id: &str, process: ManagedProcess) {
     let pid = process.pid();
     let runtime = inner.runtimes.entry(id.to_string()).or_default();
     runtime.process = Some(process);
     runtime.last_error = None;
+    runtime.disconnect_requested = false;
+    runtime.reconnect_pending = false;
     match pid {
         Some(pid) => push_log(runtime, &format!("spawned ssh process pid={pid}")),
         None => push_log(runtime, "spawned interactive ssh process"),
@@ -414,6 +510,9 @@ fn apply_connected_runtime(inner: &mut InnerState, id: &str, process: ManagedPro
 
 fn apply_disconnect(inner: &mut InnerState, id: &str) {
     disconnect_runtime(inner, id);
+    let runtime = inner.runtimes.entry(id.to_string()).or_default();
+    runtime.disconnect_requested = true;
+    runtime.reconnect_pending = false;
     touch_recent_tunnel(inner, id);
 }
 
@@ -421,6 +520,9 @@ fn apply_disconnect_all(inner: &mut InnerState) {
     let ids: Vec<String> = inner.tunnels.iter().map(|item| item.id.clone()).collect();
     for id in ids {
         disconnect_runtime(inner, &id);
+        let runtime = inner.runtimes.entry(id.to_string()).or_default();
+        runtime.disconnect_requested = true;
+        runtime.reconnect_pending = false;
         touch_recent_tunnel(inner, &id);
     }
 }
@@ -515,15 +617,30 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                 runtime.process = None;
                 if status.contains("exit status: 0") || status.contains("code: 0") {
                     runtime.last_error = None;
+                    runtime.reconnect_pending = false;
                     push_log(runtime, "ssh process exited");
                     TunnelStatus::Idle
                 } else {
                     runtime.last_error = Some(format!("ssh exited with status {status}"));
+                    runtime.reconnect_pending = !runtime.disconnect_requested;
                     push_log(runtime, &format!("ssh exited with status {status}"));
                     TunnelStatus::Error
                 }
             }
-            Ok(None) => TunnelStatus::Connected,
+            Ok(None) => {
+                if let Some(error) = detect_runtime_error(&runtime.recent_log) {
+                    runtime.last_error = Some(error.clone());
+                    return TunnelStatus::Error;
+                }
+
+                if process.needs_connection_signal() && !has_connection_signal(&runtime.recent_log) {
+                    runtime.last_error = None;
+                    return TunnelStatus::Idle;
+                }
+
+                runtime.last_error = None;
+                TunnelStatus::Connected
+            }
             Err(error) => {
                 runtime.last_error = Some(error.to_string());
                 push_log(runtime, &format!("failed to query process status: {error}"));
@@ -535,6 +652,43 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
     } else {
         TunnelStatus::Idle
     }
+}
+
+fn detect_runtime_error(logs: &[String]) -> Option<String> {
+    const ERROR_PATTERNS: &[&str] = &[
+        "permission denied",
+        "host key verification failed",
+        "connection refused",
+        "connection timed out",
+        "could not resolve hostname",
+        "name or service not known",
+        "no route to host",
+        "network is unreachable",
+        "operation timed out",
+    ];
+
+    logs.iter().rev().find_map(|line| {
+        let lower = line.to_ascii_lowercase();
+        ERROR_PATTERNS
+            .iter()
+            .any(|pattern| lower.contains(pattern))
+            .then(|| line.clone())
+    })
+}
+
+fn has_connection_signal(logs: &[String]) -> bool {
+    const SUCCESS_PATTERNS: &[&str] = &[
+        "authenticated to ",
+        "entering interactive session",
+        "pledge: network",
+    ];
+
+    logs.iter().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        SUCCESS_PATTERNS
+            .iter()
+            .any(|pattern| lower.contains(pattern))
+    })
 }
 
 fn flush_process_logs(runtime: &mut TunnelRuntime) -> Result<(), String> {
@@ -689,6 +843,14 @@ pub fn run() {
         .manage(AppState::new())
         .setup(|app| {
             build_tray(app)?;
+            {
+                let state = app.state::<AppState>();
+                if let Ok(mut inner) = state.inner.lock() {
+                    apply_startup_auto_connect(&mut inner);
+                    let _ = refresh_tray_menu(app.handle(), &inner);
+                };
+            }
+            spawn_runtime_maintenance_loop(app.handle().clone());
 
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 let handle = app.handle().clone();
@@ -779,6 +941,58 @@ mod runtime_tests {
     }
 
     #[test]
+    fn refresh_runtime_does_not_report_connected_while_prompted_session_is_waiting() {
+        let mut runtime = runtime_with_launch(LaunchPlan::PromptedPassword {
+            command: prompted_waiting_command(),
+            password: "s3cr3t".into(),
+            prompt: "assword:".into(),
+        });
+
+        let status = wait_for_status_with_log(&mut runtime, |runtime| {
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("password sent to interactive ssh session"))
+        });
+
+        disconnect_runtime_from_runtime(&mut runtime);
+
+        assert!(matches!(status, TunnelStatus::Idle));
+        assert!(
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("password sent to interactive ssh session"))
+        );
+    }
+
+    #[test]
+    fn refresh_runtime_returns_error_when_live_session_emits_auth_failure() {
+        let mut runtime = runtime_with_launch(LaunchPlan::PromptedPassword {
+            command: prompted_auth_failure_command(),
+            password: "s3cr3t".into(),
+            prompt: "assword:".into(),
+        });
+
+        let status = wait_for_status_with_log(&mut runtime, |runtime| {
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.to_ascii_lowercase().contains("permission denied"))
+        });
+
+        disconnect_runtime_from_runtime(&mut runtime);
+
+        assert!(matches!(status, TunnelStatus::Error));
+        assert!(
+            runtime
+                .last_error
+                .as_deref()
+                .is_some_and(|value| value.to_ascii_lowercase().contains("permission denied"))
+        );
+    }
+
+    #[test]
     fn disconnect_runtime_clears_process_adds_stop_log_and_resets_error() {
         let mut runtime = runtime_with_process(long_running_command());
         runtime.last_error = Some("previous failure".into());
@@ -816,15 +1030,46 @@ mod runtime_tests {
         }
     }
 
+    fn wait_for_status_with_log(
+        runtime: &mut TunnelRuntime,
+        ready: impl Fn(&TunnelRuntime) -> bool,
+    ) -> TunnelStatus {
+        let deadline = Instant::now() + Duration::from_secs(2);
+
+        loop {
+            let status = refresh_runtime(runtime);
+            if ready(runtime) {
+                return status;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "runtime did not emit expected logs: {:?}",
+                runtime.recent_log
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
     fn runtime_with_process(command: CommandSpec) -> TunnelRuntime {
+        runtime_with_launch(LaunchPlan::Native(command))
+    }
+
+    fn runtime_with_launch(plan: LaunchPlan) -> TunnelRuntime {
         TunnelRuntime {
-            process: Some(
-                ManagedProcess::spawn(LaunchPlan::Native(command))
-                    .expect("spawn managed process for runtime test"),
-            ),
+            process: Some(ManagedProcess::spawn(plan).expect("spawn managed process for runtime test")),
             last_error: None,
             recent_log: Vec::new(),
+            disconnect_requested: false,
+            reconnect_pending: false,
         }
+    }
+
+    fn disconnect_runtime_from_runtime(runtime: &mut TunnelRuntime) {
+        if let Some(process) = runtime.process.as_mut() {
+            let _ = process.kill();
+        }
+        runtime.process = None;
     }
 
     #[cfg(target_os = "windows")]
@@ -872,6 +1117,44 @@ mod runtime_tests {
         CommandSpec {
             program: "sh".into(),
             args: vec!["-c".into(), "sleep 5".into()],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn prompted_waiting_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec![
+                "/C".into(),
+                "set /p =Password: < nul & ping -n 6 127.0.0.1 > nul".into(),
+            ],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn prompted_waiting_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "printf 'Password:'; sleep 5".into()],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn prompted_auth_failure_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec![
+                "/C".into(),
+                "(echo Permission denied 1>&2) & ping -n 6 127.0.0.1 > nul".into(),
+            ],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn prompted_auth_failure_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "echo 'Permission denied' >&2; sleep 5".into()],
         }
     }
 }
@@ -977,6 +1260,31 @@ mod save_delete_tests {
         let _ = fs::remove_file(config_path);
     }
 
+    #[test]
+    fn password_auth_save_requires_new_or_existing_credential() {
+        let tunnel = super::prepare_tunnel_for_save(password_tunnel("db")).expect("normalize tunnel");
+
+        let result = super::ensure_password_credential_for_save(&tunnel, None, |_| {
+            Err("missing secret".into())
+        });
+
+        assert_eq!(
+            result,
+            Err("password auth requires a password or an existing stored credential".into())
+        );
+    }
+
+    #[test]
+    fn password_auth_save_allows_existing_stored_credential() {
+        let tunnel = super::prepare_tunnel_for_save(password_tunnel("db")).expect("normalize tunnel");
+
+        let result = super::ensure_password_credential_for_save(&tunnel, None, |_| {
+            Ok("stored-secret".into())
+        });
+
+        assert_eq!(result, Ok(()));
+    }
+
     fn sample_tunnel(id: &str) -> TunnelDefinition {
         TunnelDefinition {
             id: id.into(),
@@ -993,6 +1301,15 @@ mod save_delete_tests {
             auto_connect: false,
             auto_reconnect: true,
             password_entry: Some("profile:stale".into()),
+        }
+    }
+
+    fn password_tunnel(id: &str) -> TunnelDefinition {
+        TunnelDefinition {
+            auth_kind: AuthKind::Password,
+            private_key_path: None,
+            password_entry: Some(format!("profile:{id}")),
+            ..sample_tunnel(id)
         }
     }
 
@@ -1060,6 +1377,8 @@ mod command_flow_tests {
                     process: Some(spawn_process(long_running_command())),
                     last_error: Some("stale failure".into()),
                     recent_log: Vec::new(),
+                    disconnect_requested: false,
+                    reconnect_pending: false,
                 },
             )]
             .into_iter()
@@ -1110,6 +1429,8 @@ mod command_flow_tests {
                     process: Some(spawn_process(long_running_command())),
                     last_error: Some("old error".into()),
                     recent_log: Vec::new(),
+                    disconnect_requested: false,
+                    reconnect_pending: false,
                 },
             )]
             .into_iter()
@@ -1141,8 +1462,90 @@ mod command_flow_tests {
 
         super::apply_disconnect(&mut inner, "db");
 
-        assert!(!inner.runtimes.contains_key("db"));
+        let runtime = inner.runtimes.get("db").expect("disconnect should record runtime state");
+        assert!(runtime.process.is_none());
+        assert!(runtime.disconnect_requested);
+        assert!(!runtime.reconnect_pending);
         assert_eq!(inner.recent_tunnel_ids, vec!["db".to_string(), "cache".to_string()]);
+    }
+
+    #[test]
+    fn collect_auto_connect_ids_returns_only_marked_tunnels_in_order() {
+        let mut db = private_key_tunnel("db");
+        db.auto_connect = true;
+        let cache = private_key_tunnel("cache");
+        let mut metrics = private_key_tunnel("metrics");
+        metrics.auto_connect = true;
+
+        let ids = super::collect_auto_connect_ids(&[db, cache, metrics]);
+
+        assert_eq!(ids, vec!["db".to_string(), "metrics".to_string()]);
+    }
+
+    #[test]
+    fn collect_pending_reconnect_ids_ignores_disabled_and_user_disconnected_tunnels() {
+        let enabled = private_key_tunnel("db");
+        let mut disabled = private_key_tunnel("cache");
+        disabled.auto_reconnect = false;
+        let ignored = private_key_tunnel("metrics");
+
+        let mut inner = InnerState {
+            tunnels: vec![enabled, disabled, ignored],
+            runtimes: Default::default(),
+            recent_tunnel_ids: vec![],
+        };
+        inner.runtimes.insert(
+            "db".into(),
+            TunnelRuntime {
+                reconnect_pending: true,
+                ..TunnelRuntime::default()
+            },
+        );
+        inner.runtimes.insert(
+            "cache".into(),
+            TunnelRuntime {
+                reconnect_pending: true,
+                ..TunnelRuntime::default()
+            },
+        );
+        inner.runtimes.insert(
+            "metrics".into(),
+            TunnelRuntime {
+                reconnect_pending: true,
+                disconnect_requested: true,
+                ..TunnelRuntime::default()
+            },
+        );
+
+        let ids = super::collect_pending_reconnect_ids(&inner);
+
+        assert_eq!(ids, vec!["db".to_string()]);
+    }
+
+    #[test]
+    fn apply_disconnect_marks_runtime_to_suppress_reconnect() {
+        let mut inner = InnerState {
+            tunnels: vec![private_key_tunnel("db")],
+            runtimes: [(
+                "db".to_string(),
+                TunnelRuntime {
+                    process: Some(spawn_process(long_running_command())),
+                    last_error: None,
+                    recent_log: Vec::new(),
+                    disconnect_requested: false,
+                    reconnect_pending: true,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            recent_tunnel_ids: vec![],
+        };
+
+        super::apply_disconnect(&mut inner, "db");
+
+        let runtime = inner.runtimes.get("db").expect("db runtime should remain");
+        assert!(runtime.disconnect_requested);
+        assert!(!runtime.reconnect_pending);
     }
 
     #[test]
@@ -1258,6 +1661,8 @@ mod tray_disconnect_all_tests {
                         process: Some(spawn_process(long_running_command())),
                         last_error: Some("old db error".into()),
                         recent_log: Vec::new(),
+                        disconnect_requested: false,
+                        reconnect_pending: false,
                     },
                 ),
                 (
@@ -1266,6 +1671,8 @@ mod tray_disconnect_all_tests {
                         process: Some(spawn_process(long_running_command())),
                         last_error: Some("old cache error".into()),
                         recent_log: Vec::new(),
+                        disconnect_requested: false,
+                        reconnect_pending: false,
                     },
                 ),
                 (
@@ -1274,6 +1681,8 @@ mod tray_disconnect_all_tests {
                         process: None,
                         last_error: Some("idle warning".into()),
                         recent_log: Vec::new(),
+                        disconnect_requested: false,
+                        reconnect_pending: false,
                     },
                 ),
             ]
@@ -1328,6 +1737,8 @@ mod tray_disconnect_all_tests {
                     process: Some(spawn_process(long_running_command())),
                     last_error: None,
                     recent_log: Vec::new(),
+                    disconnect_requested: false,
+                    reconnect_pending: false,
                 },
             )]
             .into_iter()
@@ -1337,8 +1748,12 @@ mod tray_disconnect_all_tests {
 
         super::apply_disconnect_all(&mut inner);
 
-        assert!(inner.runtimes.contains_key("db"));
-        assert!(!inner.runtimes.contains_key("cache"));
+        let db = inner.runtimes.get("db").expect("db runtime");
+        let cache = inner.runtimes.get("cache").expect("cache runtime");
+        assert!(db.disconnect_requested);
+        assert!(cache.disconnect_requested);
+        assert!(db.process.is_none());
+        assert!(cache.process.is_none());
         assert_eq!(inner.recent_tunnel_ids, vec!["cache".to_string(), "db".to_string()]);
     }
 

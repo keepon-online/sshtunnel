@@ -165,6 +165,76 @@
     };
   }
 
+  function createTunnelListNode(document, itemView, onSelect) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `tunnel-item${itemView.isActive ? " active" : ""}`;
+
+    const title = document.createElement("h3");
+    title.textContent = itemView.title;
+    item.appendChild(title);
+
+    const subtitle = document.createElement("p");
+    subtitle.textContent = itemView.subtitle;
+    item.appendChild(subtitle);
+
+    const forward = document.createElement("p");
+    forward.textContent = itemView.forwardText;
+    item.appendChild(forward);
+
+    const badge = document.createElement("span");
+    badge.className = `badge ${itemView.badgeTone}`;
+    badge.textContent = itemView.badgeText;
+    item.appendChild(badge);
+
+    item.addEventListener("click", onSelect);
+    return item;
+  }
+
+  function buildTunnelListSignature(tunnels, selectedId, describeTunnelListItem) {
+    return JSON.stringify(
+      (tunnels ?? []).map((tunnel) => {
+        const itemView = describeTunnelListItem(tunnel, selectedId);
+        return {
+          id: tunnel?.definition?.id ?? "",
+          title: itemView.title,
+          subtitle: itemView.subtitle,
+          forwardText: itemView.forwardText,
+          badgeTone: itemView.badgeTone,
+          badgeText: itemView.badgeText,
+          isActive: itemView.isActive,
+        };
+      }),
+    );
+  }
+
+  function renderTunnelList(
+    list,
+    document,
+    tunnels,
+    selectedId,
+    describeTunnelListItem,
+    onSelectById,
+    previousSignature,
+  ) {
+    const signature = buildTunnelListSignature(tunnels, selectedId, describeTunnelListItem);
+    if (signature === previousSignature) {
+      return signature;
+    }
+
+    list.innerHTML = "";
+
+    for (const tunnel of tunnels ?? []) {
+      const itemView = describeTunnelListItem(tunnel, selectedId);
+      const item = createTunnelListNode(document, itemView, () => {
+        onSelectById(tunnel.definition.id);
+      });
+      list.appendChild(item);
+    }
+
+    return signature;
+  }
+
   function mapStatusSummaryToCommandCenterCards(summary) {
     const reconnectText = summary?.authMeta || "无数据";
     const errorText = summary?.errorText || "";
@@ -211,6 +281,7 @@
       selectedId: null,
       editorOpen: false,
       editingId: null,
+      listSignature: null,
     };
 
     const refs = {
@@ -354,25 +425,18 @@
     }
 
     function renderList() {
-      refs.list.innerHTML = "";
-
-      for (const tunnel of state.snapshot?.tunnels ?? []) {
-        const itemView = describeTunnelListItem(tunnel, state.selectedId);
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = `tunnel-item${itemView.isActive ? " active" : ""}`;
-        item.innerHTML = `
-          <h3>${itemView.title}</h3>
-          <p>${itemView.subtitle}</p>
-          <p>${itemView.forwardText}</p>
-          <span class="badge ${itemView.badgeTone}">${itemView.badgeText}</span>
-        `;
-        item.addEventListener("click", () => {
-          state.selectedId = tunnel.definition.id;
+      state.listSignature = renderTunnelList(
+        refs.list,
+        document,
+        state.snapshot?.tunnels ?? [],
+        state.selectedId,
+        describeTunnelListItem,
+        (id) => {
+          state.selectedId = id;
           render();
-        });
-        refs.list.appendChild(item);
-      }
+        },
+        state.listSignature,
+      );
     }
 
     function render() {
@@ -540,6 +604,8 @@
 
   return {
     buildCommandCenterView,
+    createTunnelListNode,
+    renderTunnelList,
     mapStatusSummaryToCommandCenterCards,
     DESKTOP_ONLY_MESSAGE,
     bootstrap,

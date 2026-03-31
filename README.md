@@ -11,6 +11,7 @@
 - 已接入系统凭据库适配：Windows Credential Manager / Linux Secret Service
 - 当前连接流程优先调用系统 `ssh`
 - 密码认证已接入 PTY 交互执行链路，会在检测到密码提示符后向系统 `ssh` 写入凭据库中的密码
+- 密码认证启动参数会自动接受首次出现的新 host key，并结合 verbose SSH 输出判断隧道是否真正进入连接态
 - 原生 `ssh` 连接已采集实时 `stderr`，并写入运行日志面板
 - Windows 发布版启动隧道时不再弹出 `cmd` 黑框
 - 已暴露开机自启状态与切换开关
@@ -21,6 +22,7 @@
 - 已为 command-center 文案增加 view-model 契约测试，并在 app 层补充渲染模型回归测试
 - 已强化工作区状态概览，优先显示当前连接状态、转发、认证和重连/错误信息
 - 已将日志面板升级为时间线式诊断视图，区分状态事件与 SSH 输出
+- 已实现 `auto_connect` 启动自动连接和 `auto_reconnect` 的异常退出后自动重连
 - 已为后端运行时增加日志截断、退出状态和断开清理测试
 - 已为后端 save/delete 配置流增加状态变更与持久化测试
 - 已为 connect/disconnect/autostart 命令流增加 helper 级自动化测试
@@ -62,6 +64,8 @@ cargo check -p sshtunnel-app
 - 密码通过 `keyring` crate 写入系统凭据库
 - 密钥认证直接生成 `ssh -L` 参数
 - 密码认证通过交互式 PTY 会话驱动系统 `ssh`
+- 前端隧道列表按文本节点渲染，避免配置字段注入到 WebView DOM
+- 密码认证配置必须同时具备新密码或系统凭据库中的已有凭据，后端会在保存时拒绝无效配置
 
 ## 已知限制
 

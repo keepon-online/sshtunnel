@@ -1,10 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const {
   buildCommandCenterView,
   mapStatusSummaryToCommandCenterCards,
   DESKTOP_ONLY_MESSAGE,
+  createTunnelListNode,
+  renderTunnelList,
   createDesktopBridge,
   fillPrivateKeyPath,
   shouldRefreshSnapshot,
@@ -21,6 +25,51 @@ function fakeMessageNode() {
         this.owner.hidden = force;
       },
       owner: null,
+    },
+  };
+}
+
+function fakeElement(tagName) {
+  return {
+    tagName,
+    type: "",
+    className: "",
+    textContent: "",
+    children: [],
+    listeners: {},
+    addEventListener(name, handler) {
+      this.listeners[name] = handler;
+    },
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    },
+  };
+}
+
+function fakeDocument() {
+  return {
+    createElement(tagName) {
+      return fakeElement(tagName);
+    },
+  };
+}
+
+function fakeList() {
+  return {
+    children: [],
+    resetCount: 0,
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    },
+    set innerHTML(value) {
+      this.resetCount += 1;
+      this.children = [];
+      this._innerHTML = value;
+    },
+    get innerHTML() {
+      return this._innerHTML || "";
     },
   };
 }
@@ -64,6 +113,76 @@ test("fillPrivateKeyPath writes the selected path back into the input", () => {
   fillPrivateKeyPath(input, "/home/top/.ssh/id_ed25519");
 
   assert.equal(input.value, "/home/top/.ssh/id_ed25519");
+});
+
+test("createTunnelListNode renders tunnel fields as text nodes instead of HTML", () => {
+  const item = createTunnelListNode(
+    fakeDocument(),
+    {
+      title: '<img src=x onerror="alert(1)">',
+      subtitle: "deploy@bastion.example.com",
+      forwardText: "127.0.0.1:15432 -> db.internal:5432",
+      badgeTone: "connected",
+      badgeText: "<b>已连接</b>",
+      isActive: true,
+    },
+    () => {},
+  );
+
+  assert.equal(item.tagName, "button");
+  assert.equal(item.className, "tunnel-item active");
+  assert.equal(item.children[0].tagName, "h3");
+  assert.equal(item.children[0].textContent, '<img src=x onerror="alert(1)">');
+  assert.equal(item.children[3].tagName, "span");
+  assert.equal(item.children[3].textContent, "<b>已连接</b>");
+});
+
+test("renderTunnelList skips DOM rebuild when tunnel list signature is unchanged", () => {
+  const list = fakeList();
+  const document = fakeDocument();
+  const tunnels = [
+    {
+      definition: {
+        id: "db",
+      },
+      status: "idle",
+    },
+  ];
+  const describeTunnelListItem = (tunnel, selectedId) => ({
+    title: `title-${tunnel.definition.id}`,
+    subtitle: "deploy@bastion.example.com",
+    forwardText: "127.0.0.1:15432 -> db.internal:5432",
+    badgeTone: tunnel.status,
+    badgeText: tunnel.status,
+    isActive: tunnel.definition.id === selectedId,
+  });
+
+  const firstSignature = renderTunnelList(
+    list,
+    document,
+    tunnels,
+    "db",
+    describeTunnelListItem,
+    () => {},
+    null,
+  );
+
+  assert.equal(list.resetCount, 1);
+  assert.equal(list.children.length, 1);
+
+  const secondSignature = renderTunnelList(
+    list,
+    document,
+    tunnels,
+    "db",
+    describeTunnelListItem,
+    () => {},
+    firstSignature,
+  );
+
+  assert.equal(secondSignature, firstSignature);
+  assert.equal(list.resetCount, 1);
+  assert.equal(list.children.length, 1);
 });
 
 test("shouldRefreshSnapshot pauses auto refresh while the editor drawer is open", () => {
@@ -223,4 +342,18 @@ test("mapStatusSummaryToCommandCenterCards keeps reconnect detail for healthy fa
     healthLabel: "连接健康",
     healthValue: "自动重连: 开启",
   });
+});
+
+test("styles keep select controls readable in dark theme", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../styles.css"), "utf8");
+
+  assert.match(css, /select\s*\{[\s\S]*appearance:\s*none;/);
+  assert.match(css, /select\s*\{[\s\S]*-webkit-appearance:\s*none;/);
+  assert.match(css, /select\s*\{[\s\S]*background:\s*rgba\(0,\s*0,\s*0,\s*0\.2\)/);
+  assert.match(css, /select\s*\{[\s\S]*color:\s*#fff;/);
+  assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{/);
+  assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{[\s\S]*color:\s*var\(--muted\)/);
+  assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{[\s\S]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.04\)/);
+  assert.match(css, /label span\s*\{[\s\S]*color:\s*var\(--ink\)/);
+  assert.match(css, /input::placeholder,\s*[\r\n\s]*select::placeholder\s*\{[\s\S]*color:\s*var\(--muted\)/);
 });

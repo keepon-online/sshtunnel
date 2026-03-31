@@ -734,6 +734,22 @@ select {
   transition: all 0.25s ease;
 }
 
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 20px) calc(50% - 2px) / 8px 8px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 14px) calc(50% - 2px) / 8px 8px no-repeat,
+    rgba(0, 0, 0, 0.2);
+  padding-right: 40px;
+}
+
+select option {
+  color: var(--ink);
+  background: #111827;
+}
+
 input:hover,
 select:hover {
   border-color: rgba(255, 255, 255, 0.2);
@@ -745,6 +761,14 @@ select:focus {
   border-color: var(--accent);
   background: rgba(0, 0, 0, 0.4);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+}
+
+input:disabled,
+select:disabled {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  cursor: not-allowed;
 }
 
 input::placeholder,

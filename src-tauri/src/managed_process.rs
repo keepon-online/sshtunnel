@@ -17,6 +17,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub struct ManagedProcess {
     inner: ManagedProcessInner,
     logs: Arc<Mutex<Vec<String>>>,
+    needs_connection_signal: bool,
 }
 
 enum ManagedProcessInner {
@@ -94,6 +95,10 @@ impl ManagedProcess {
         std::mem::take(&mut *logs)
     }
 
+    pub fn needs_connection_signal(&self) -> bool {
+        self.needs_connection_signal
+    }
+
     fn spawn_native(command: CommandSpec) -> Result<Self, String> {
         let mut child = Command::new(&command.program);
         child.args(command.args);
@@ -116,6 +121,7 @@ impl ManagedProcess {
                 reader_thread: Some(reader_thread),
             }),
             logs,
+            needs_connection_signal: false,
         })
     }
 
@@ -200,6 +206,7 @@ impl ManagedProcess {
                 reader_thread: Some(reader_thread),
             }),
             logs,
+            needs_connection_signal: true,
         })
     }
 }

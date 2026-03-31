@@ -67,9 +67,13 @@ fn password_auth_uses_prompted_password_launch() {
             assert_eq!(command.program, "ssh");
             assert_eq!(password, "s3cr3t");
             assert_eq!(prompt, "assword:");
+            assert!(command.args.contains(&"-v".to_string()));
             assert!(command
                 .args
                 .contains(&"PreferredAuthentications=password".to_string()));
+            assert!(command
+                .args
+                .contains(&"StrictHostKeyChecking=accept-new".to_string()));
         }
         _ => panic!("expected prompted password launch plan"),
     }
