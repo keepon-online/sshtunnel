@@ -589,8 +589,23 @@ fn is_connected(inner: &InnerState, id: &str) -> bool {
     inner
         .runtimes
         .get(id)
-        .and_then(|runtime| runtime.process.as_ref())
-        .is_some()
+        .is_some_and(runtime_is_connected_for_tray)
+}
+
+fn runtime_is_connected_for_tray(runtime: &TunnelRuntime) -> bool {
+    let Some(process) = runtime.process.as_ref() else {
+        return false;
+    };
+
+    if runtime.last_error.is_some() {
+        return false;
+    }
+
+    if process.needs_connection_signal() && !has_connection_signal(&runtime.recent_log) {
+        return false;
+    }
+
+    true
 }
 
 fn recent_tray_menu_items(inner: &InnerState) -> Vec<TrayTunnelItem> {
@@ -933,6 +948,7 @@ mod runtime_tests {
         time::{Duration, Instant},
     };
 
+    use sshtunnel_core::models::{AuthKind, TunnelDefinition};
     use sshtunnel_core::ssh_launch::{CommandSpec, LaunchPlan};
 
     use super::{
@@ -1040,6 +1056,34 @@ mod runtime_tests {
     }
 
     #[test]
+    fn recent_tray_items_do_not_mark_prompted_waiting_session_connected() {
+        let mut runtime = runtime_with_launch(LaunchPlan::PromptedPassword {
+            command: prompted_waiting_command(),
+            password: "s3cr3t".into(),
+            prompt: "assword:".into(),
+        });
+
+        let _ = wait_for_status_with_log(&mut runtime, |runtime| {
+            runtime
+                .recent_log
+                .iter()
+                .any(|line| line.contains("password sent to interactive ssh session"))
+        });
+
+        let mut inner = super::InnerState {
+            tunnels: vec![tunnel("db")],
+            runtimes: [("db".to_string(), runtime)].into_iter().collect(),
+            recent_tunnel_ids: vec!["db".into()],
+        };
+
+        let items = super::recent_tray_menu_items(&inner);
+        disconnect_runtime(&mut inner, "db");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].action, super::tray_model::TrayTunnelAction::Connect);
+    }
+
+    #[test]
     fn disconnect_runtime_clears_process_adds_stop_log_and_resets_error() {
         let mut runtime = runtime_with_process(long_running_command());
         runtime.last_error = Some("previous failure".into());
@@ -1117,6 +1161,25 @@ mod runtime_tests {
             let _ = process.kill();
         }
         runtime.process = None;
+    }
+
+    fn tunnel(id: &str) -> TunnelDefinition {
+        TunnelDefinition {
+            id: id.into(),
+            name: format!("{id}-name"),
+            ssh_host: "bastion.example.com".into(),
+            ssh_port: 22,
+            username: "deploy".into(),
+            local_bind_address: "127.0.0.1".into(),
+            local_bind_port: 15432,
+            remote_host: "10.0.0.12".into(),
+            remote_port: 5432,
+            auth_kind: AuthKind::PrivateKey,
+            private_key_path: Some("~/.ssh/id_ed25519".into()),
+            auto_connect: false,
+            auto_reconnect: true,
+            password_entry: None,
+        }
     }
 
     #[cfg(target_os = "windows")]
