@@ -185,7 +185,7 @@ impl ManagedProcess {
                         if !sent_password
                             && transcript.to_ascii_lowercase().contains(&prompt)
                             && writer.write_all(password.as_bytes()).is_ok()
-                            && writer.write_all(b"\n").is_ok()
+                            && writer.write_all(b"\r").is_ok()
                         {
                             let _ = writer.flush();
                             sent_password = true;
