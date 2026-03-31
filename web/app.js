@@ -308,6 +308,9 @@
       statusEventsLog: document.getElementById("status-events-log"),
       sshOutputLog: document.getElementById("ssh-output-log"),
       newTunnel: document.getElementById("new-tunnel"),
+      themeToggle: document.getElementById("theme-toggle"),
+      themeIconLight: document.getElementById("theme-icon-light"),
+      themeIconDark: document.getElementById("theme-icon-dark"),
       connectBtn: document.getElementById("connect-btn"),
       disconnectBtn: document.getElementById("disconnect-btn"),
       editBtn: document.getElementById("edit-btn"),
@@ -592,6 +595,24 @@
     refs.cancelEdit.addEventListener("click", closeEditor);
     refs.drawerBackdrop.addEventListener("click", closeEditor);
     refs.authKind.addEventListener("change", syncAuthFields);
+
+    function syncThemeIcons() {
+      const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+      if (!refs.themeIconLight || !refs.themeIconDark) return;
+      refs.themeIconLight.classList.toggle("hidden", isDark);
+      refs.themeIconDark.classList.toggle("hidden", !isDark);
+    }
+
+    if (refs.themeToggle) {
+      refs.themeToggle.addEventListener("click", () => {
+        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+        const targetTheme = isDark ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", targetTheme);
+        localStorage.setItem("theme", targetTheme);
+        syncThemeIcons();
+      });
+      syncThemeIcons();
+    }
 
     setInterval(() => {
       if (shouldRefreshSnapshot(state, document.visibilityState)) {

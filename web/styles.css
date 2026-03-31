@@ -1,4 +1,4 @@
-:root {
+:root, :root[data-theme="dark"] {
   /* Ultra-Premium Dark Theme Colors */
   --bg-top: #0b0e14;
   --bg-bottom: #121822;
@@ -11,6 +11,9 @@
   --surface-strong: rgba(30, 38, 51, 0.55);
   --surface-muted: rgba(15, 20, 28, 0.4);
   --surface-hover: rgba(45, 55, 72, 0.6);
+  --surface-layer: rgba(0, 0, 0, 0.2);
+  --surface-layer-hover: rgba(0, 0, 0, 0.4);
+  --drawer-bg: rgba(15, 23, 42, 0.95);
   
   /* Borders & Lines */
   --line: rgba(255, 255, 255, 0.07);
@@ -19,14 +22,24 @@
 
   /* Typography */
   --ink: #f1f5f9; /* Slate 100 */
+  --ink-heading: #ffffff;
   --muted: #94a3b8; /* Slate 400 */
   --eyebrow: #64748b; /* Slate 500 */
+  --brand-text: linear-gradient(to right, #ffffff, #94a3b8);
+  --brand-bg: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+  --hero-bg: linear-gradient(135deg, rgba(30, 58, 138, 0.3) 0%, rgba(15, 23, 42, 0.8) 100%);
+  --select-bg-color: #111827;
+  --font-smoothing: antialiased;
+  --moz-font-smoothing: grayscale;
+  --tunnel-active-bg: radial-gradient(circle at top right, rgba(14, 165, 233, 0.15), rgba(30, 41, 59, 0.6) 70%);
 
   /* Status Colors */
   --accent: #0ea5e9; /* Sky 500 */
   --accent-strong: #0284c7; /* Sky 600 */
   --accent-soft: rgba(14, 165, 233, 0.15);
   --accent-glow: 0 0 16px rgba(14, 165, 233, 0.4);
+  --accent-btn-bg: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  --accent-btn-shadow: 0 2px 8px rgba(14, 165, 233, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 
   --ok: #10b981; /* Emerald 500 */
   --ok-soft: rgba(16, 185, 129, 0.15);
@@ -35,6 +48,7 @@
   --danger: #f43f5e; /* Rose 500 */
   --danger-soft: rgba(244, 63, 94, 0.15);
   --danger-glow: 0 0 16px rgba(244, 63, 94, 0.3);
+  --danger-btn-bg: linear-gradient(180deg, #f43f5e 0%, #be123c 100%);
 
   --idle: #cbd5e1; /* Slate 300 */
   --idle-soft: rgba(203, 213, 225, 0.12);
@@ -49,6 +63,80 @@
   --panel-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.6);
   --drawer-shadow: -24px 0 64px -12px rgba(0, 0, 0, 0.8);
   --card-hover-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line-strong) inset;
+}
+
+:root[data-theme="light"] {
+  /* Premium Light Theme Colors */
+  --bg-top: #f8fafc; /* Slate 50 */
+  --bg-bottom: #e2e8f0; /* Slate 200 */
+  --bg-accent-1: rgba(14, 165, 233, 0.08);
+  --bg-accent-2: rgba(139, 92, 246, 0.06);
+  --bg-accent-3: rgba(16, 185, 129, 0.05);
+
+  /* Glassmorphism Surfaces */
+  --surface: rgba(255, 255, 255, 0.65);
+  --surface-strong: rgba(255, 255, 255, 0.8);
+  --surface-muted: rgba(241, 245, 249, 0.6); /* Slate 100 */
+  --surface-hover: rgba(248, 250, 252, 0.9);
+  --surface-layer: rgba(241, 245, 249, 0.7); /* Slate 100 */
+  --surface-layer-hover: rgba(226, 232, 240, 0.8); /* Slate 200 */
+  --drawer-bg: rgba(255, 255, 255, 0.95);
+
+  /* Borders & Lines */
+  --line: rgba(15, 23, 42, 0.08); /* Slate 900 */
+  --line-strong: rgba(15, 23, 42, 0.15);
+  --line-focus: rgba(14, 165, 233, 0.6);
+
+  /* Typography */
+  --ink: #334155; /* Slate 700 - Softer than pure black for natural reading */
+  --ink-heading: #0f172a; /* Slate 900 for high-contrast titles */
+  --muted: #64748b; /* Slate 500 */
+  --eyebrow: #475569; /* Slate 600 */
+  --brand-text: linear-gradient(to right, #0f172a, #475569);
+  --brand-bg: linear-gradient(135deg, rgba(226, 232, 240, 0.8) 0%, rgba(203, 213, 225, 0.9) 100%);
+  --hero-bg: linear-gradient(135deg, rgba(186, 230, 253, 0.3) 0%, rgba(226, 232, 240, 0.8) 100%);
+  --select-bg-color: #ffffff;
+  --font-smoothing: auto;
+  --moz-font-smoothing: auto;
+  --tunnel-active-bg: radial-gradient(circle at top right, rgba(14, 165, 233, 0.1), rgba(255, 255, 255, 0.9) 70%);
+
+  /* Status Colors */
+  --accent: #0284c7; /* Sky 600 */
+  --accent-strong: #0369a1; /* Sky 700 */
+  --accent-soft: rgba(14, 165, 233, 0.1);
+  --accent-glow: 0 0 12px rgba(14, 165, 233, 0.2);
+  --accent-btn-bg: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  --accent-btn-shadow: 0 2px 8px rgba(14, 165, 233, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+
+  --ok: #059669; /* Emerald 600 */
+  --ok-soft: rgba(16, 185, 129, 0.1);
+  --ok-glow: 0 0 12px rgba(16, 185, 129, 0.2);
+
+  --danger: #e11d48; /* Rose 600 */
+  --danger-soft: rgba(244, 63, 94, 0.1);
+  --danger-glow: 0 0 12px rgba(244, 63, 94, 0.2);
+  --danger-btn-bg: linear-gradient(180deg, #e11d48 0%, #be123c 100%);
+
+  --idle: #475569; /* Slate 600 */
+  --idle-soft: rgba(148, 163, 184, 0.2); /* Slate 400 */
+
+  /* Scrollbars */
+  --scrollbar-thumb: rgba(15, 23, 42, 0.15);
+  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.3);
+  --scrollbar-track: transparent;
+
+  /* Shadows */
+  --shell-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.15);
+  --panel-shadow: 0 12px 24px -8px rgba(15, 23, 42, 0.12);
+  --drawer-shadow: -24px 0 64px -12px rgba(15, 23, 42, 0.2);
+  --card-hover-shadow: 0 12px 20px -6px rgba(15, 23, 42, 0.1), 0 0 0 1px var(--line-strong) inset;
+}
+
+body * {
+  /* Default color transition for components unless specifically overridden */
+  transition-property: background-color, border-color, color, box-shadow, text-shadow, fill, stroke;
+  transition-duration: 0.3s;
+  transition-timing-function: ease;
 }
 
 * {
@@ -71,8 +159,8 @@ body {
     radial-gradient(circle at 50% 100%, var(--bg-accent-3), transparent 45%),
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
   background-attachment: fixed;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: var(--font-smoothing);
+  -moz-osx-font-smoothing: var(--moz-font-smoothing);
 }
 
 /* Scrollbars */
@@ -148,7 +236,7 @@ body {
 /* Brand Area */
 .brand-card {
   padding: 20px;
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+  background: var(--brand-bg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   position: relative;
   overflow: hidden;
@@ -171,8 +259,9 @@ body {
   font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.03em;
-  background: linear-gradient(to right, #ffffff, #94a3b8);
+  background: var(--brand-text);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -220,7 +309,7 @@ body {
 
 code {
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-layer);
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 12px;
@@ -253,6 +342,7 @@ code {
 .list-head h2 {
   font-size: 18px;
   font-weight: 700;
+  color: var(--ink-heading);
 }
 
 .tunnel-list {
@@ -293,7 +383,7 @@ code {
 }
 
 .tunnel-item.active {
-  background: radial-gradient(circle at top right, rgba(14, 165, 233, 0.15), rgba(30, 41, 59, 0.6) 70%);
+  background: var(--tunnel-active-bg);
   border-color: rgba(14, 165, 233, 0.4);
   box-shadow: 0 8px 24px -6px rgba(14, 165, 233, 0.2);
   transform: translateY(-2px) scale(1.01);
@@ -303,7 +393,7 @@ code {
   margin: 0 0 8px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--ink-heading);
   transition: color 0.2s;
 }
 
@@ -369,7 +459,7 @@ code {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
   padding: 24px;
-  background: linear-gradient(135deg, rgba(30, 58, 138, 0.3) 0%, rgba(15, 23, 42, 0.8) 100%);
+  background: var(--hero-bg);
   color: var(--ink);
   box-shadow: var(--panel-shadow);
 }
@@ -398,7 +488,7 @@ code {
   font-weight: 800;
   line-height: 1.2;
   letter-spacing: -0.02em;
-  color: #fff;
+  color: var(--ink-heading);
 }
 
 .workspace-subtitle {
@@ -424,9 +514,10 @@ code {
   font-size: 32px;
   font-weight: 800;
   letter-spacing: -0.02em;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-layer);
   color: var(--ink);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   transition: all 0.4s ease;
   display: inline-block;
 }
@@ -480,7 +571,7 @@ code {
 
 .support-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px var(--surface-layer-hover);
 }
 
 .summary-value {
@@ -516,7 +607,7 @@ code {
   border-radius: 12px;
   border: 1px solid rgba(244, 63, 94, 0.3);
   background: rgba(244, 63, 94, 0.1);
-  color: #fb7185; /* Rose 400 */
+  color: var(--danger);
   font-size: 14px;
   line-height: 1.5;
   box-shadow: var(--danger-glow);
@@ -542,6 +633,7 @@ code {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
+  color: var(--ink-heading);
 }
 
 .log-summary {
@@ -589,16 +681,16 @@ code {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px 14px 10px 32px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-layer);
   font-size: 13px;
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   line-height: 1.5;
-  color: #e2e8f0;
+  color: var(--ink);
   transition: all 0.2s;
 }
 
 .log-line:hover {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-layer-hover);
   border-color: var(--line-strong);
 }
 
@@ -617,7 +709,7 @@ code {
 .log-line.error {
   border-color: rgba(244, 63, 94, 0.3);
   background: rgba(244, 63, 94, 0.08);
-  color: #fecdd3; /* Rose 200 */
+  color: var(--danger);
 }
 
 .log-line.error::before {
@@ -649,9 +741,9 @@ button {
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  background: var(--accent-btn-bg);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow: var(--accent-btn-shadow);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   letter-spacing: 0.02em;
 }
@@ -676,23 +768,23 @@ button:disabled {
 button.secondary {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.12);
-  color: #f8fafc;
+  color: var(--ink);
   box-shadow: none;
 }
 
 button.secondary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px var(--surface-layer);
 }
 
 .control-column button.secondary,
 .editor-drawer button.secondary {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-layer);
 }
 
 button.danger {
-  background: linear-gradient(180deg, #f43f5e 0%, #be123c 100%);
+  background: var(--danger-btn-bg);
   box-shadow: 0 2px 8px rgba(244, 63, 94, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
@@ -729,8 +821,8 @@ select {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 12px 14px;
-  background: rgba(0, 0, 0, 0.2);
-  color: #fff;
+  background: var(--surface-layer);
+  color: var(--ink);
   transition: all 0.25s ease;
 }
 
@@ -741,33 +833,34 @@ select {
   background:
     linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 20px) calc(50% - 2px) / 8px 8px no-repeat,
     linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 14px) calc(50% - 2px) / 8px 8px no-repeat,
-    rgba(0, 0, 0, 0.2);
+    var(--surface-layer);
   padding-right: 40px;
 }
 
 select option {
   color: var(--ink);
-  background: #111827;
+  background: var(--select-bg-color);
 }
 
 input:hover,
 select:hover {
   border-color: rgba(255, 255, 255, 0.2);
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-layer-hover);
 }
 
 input:focus,
 select:focus {
   border-color: var(--accent);
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-layer-hover);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
 }
 
 input:disabled,
 select:disabled {
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--surface-layer);
+  opacity: 0.6;
+  border-color: var(--line);
   cursor: not-allowed;
 }
 
@@ -841,9 +934,9 @@ select::placeholder {
   bottom: 0;
   width: min(640px, 100vw);
   padding: 24px 32px;
-  background: rgba(15, 23, 42, 0.95);
+  background: var(--drawer-bg);
   border-radius: 32px 0 0 32px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 1px solid var(--line);
   box-shadow: var(--drawer-shadow);
   z-index: 30;
   overflow-y: auto;
@@ -873,7 +966,7 @@ select::placeholder {
 .drawer-head h2 {
   font-size: 24px;
   font-weight: 800;
-  color: #fff;
+  color: var(--ink-heading);
 }
 
 /* Animations setup */
