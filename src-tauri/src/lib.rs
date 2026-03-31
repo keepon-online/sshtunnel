@@ -116,6 +116,7 @@ struct InnerState {
 struct AppState {
     config_path: PathBuf,
     inner: Mutex<InnerState>,
+    tray_menu_signature: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -130,6 +131,7 @@ impl AppState {
                 tunnels,
                 runtimes: HashMap::new(),
             }),
+            tray_menu_signature: Mutex::new(None),
         }
     }
 }
@@ -596,6 +598,35 @@ fn recent_tray_menu_items(inner: &InnerState) -> Vec<TrayTunnelItem> {
     recent_tray_items(ordered, |id| is_connected(inner, id))
 }
 
+fn tray_menu_signature(recent_items: &[TrayTunnelItem]) -> String {
+    recent_items
+        .iter()
+        .map(|item| {
+            format!(
+                "{}|{}|{}|{}",
+                item.tunnel_id,
+                item.title,
+                item.detail,
+                tray_action_id(item.action, &item.tunnel_id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn should_refresh_tray_menu(
+    last_signature: &mut Option<String>,
+    recent_items: &[TrayTunnelItem],
+) -> bool {
+    let next_signature = tray_menu_signature(recent_items);
+    if last_signature.as_deref() == Some(next_signature.as_str()) {
+        return false;
+    }
+
+    *last_signature = Some(next_signature);
+    true
+}
+
 fn disconnect_runtime(inner: &mut InnerState, id: &str) {
     if let Some(runtime) = inner.runtimes.get_mut(id) {
         let _ = flush_process_logs(runtime);
@@ -787,6 +818,14 @@ fn refresh_tray_menu(app: &tauri::AppHandle, inner: &InnerState) -> Result<(), S
         .tray_by_id(MAIN_TRAY_ID)
         .ok_or_else(|| "tray icon not found".to_string())?;
     let recent_items = recent_tray_menu_items(inner);
+    let state = app.state::<AppState>();
+    let mut signature = state
+        .tray_menu_signature
+        .lock()
+        .map_err(|_| "tray signature poisoned".to_string())?;
+    if !should_refresh_tray_menu(&mut signature, &recent_items) {
+        return Ok(());
+    }
     let menu = build_tray_menu(app, &recent_items).map_err(|error| error.to_string())?;
     tray.set_menu(Some(menu)).map_err(|error| error.to_string())
 }
@@ -797,6 +836,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         let inner = state.inner.lock().map_err(|_| tauri::Error::InvalidWindowHandle)?;
         recent_tray_menu_items(&inner)
     };
+    {
+        let state = app.state::<AppState>();
+        let mut signature = state
+            .tray_menu_signature
+            .lock()
+            .map_err(|_| tauri::Error::InvalidWindowHandle)?;
+        *signature = Some(tray_menu_signature(&initial_items));
+    }
     let menu = build_tray_menu(app, &initial_items)?;
 
     TrayIconBuilder::with_id(MAIN_TRAY_ID)
@@ -1480,6 +1527,20 @@ mod command_flow_tests {
         let ids = super::collect_auto_connect_ids(&[db, cache, metrics]);
 
         assert_eq!(ids, vec!["db".to_string(), "metrics".to_string()]);
+    }
+
+    #[test]
+    fn should_refresh_tray_menu_skips_rebuilding_when_signature_is_unchanged() {
+        let items = vec![super::TrayTunnelItem {
+            tunnel_id: "db".into(),
+            title: "Database".into(),
+            detail: "deploy@db.example.com".into(),
+            action: super::tray_model::TrayTunnelAction::Connect,
+        }];
+        let mut signature = None;
+
+        assert!(super::should_refresh_tray_menu(&mut signature, &items));
+        assert!(!super::should_refresh_tray_menu(&mut signature, &items));
     }
 
     #[test]
