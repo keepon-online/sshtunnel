@@ -175,10 +175,12 @@
     item.appendChild(title);
 
     const subtitle = document.createElement("p");
+    subtitle.className = "tunnel-subtitle";
     subtitle.textContent = itemView.subtitle;
     item.appendChild(subtitle);
 
     const forward = document.createElement("p");
+    forward.className = "tunnel-forward";
     forward.textContent = itemView.forwardText;
     item.appendChild(forward);
 
@@ -251,6 +253,14 @@
   }
 
   function bootstrap(host, document) {
+    const unmaskedIps = new Set();
+    function toggleIpMask(key, e) {
+      if (e) e.stopPropagation();
+      if (unmaskedIps.has(key)) unmaskedIps.delete(key);
+      else unmaskedIps.add(key);
+      refresh();
+    }
+    
     const bridge = createDesktopBridge(host);
     const invoke = (command, args = {}) => bridge.invoke(command, args);
     const {
@@ -308,6 +318,9 @@
       statusEventsLog: document.getElementById("status-events-log"),
       sshOutputLog: document.getElementById("ssh-output-log"),
       newTunnel: document.getElementById("new-tunnel"),
+      settingsBtn: document.getElementById("settings-btn"),
+      settingsModal: document.getElementById("settings-modal"),
+      closeSettings: document.getElementById("close-settings"),
       themeToggle: document.getElementById("theme-toggle"),
       themeIconLight: document.getElementById("theme-icon-light"),
       themeIconDark: document.getElementById("theme-icon-dark"),
@@ -363,7 +376,12 @@
       const view = buildCommandCenterView(tunnel, hero, cards, timeline);
 
       refs.workspaceTitle.textContent = view.title;
-      refs.workspaceSubtitle.textContent = view.subtitle;
+      
+      // Right panel follows the left sidebar's eye toggle state
+      const tid = tunnel?.definition?.id;
+      const isUnmasked = tid ? unmaskedIps.has(`tunnel-${tid}`) : false;
+      refs.workspaceSubtitle.textContent = isUnmasked ? (view.subtitleRaw || view.subtitle) : view.subtitle;
+
       refs.statusLabel.textContent = view.statusLabel;
       refs.statusCard.className = `status-card ${view.statusTone}`;
       refs.statusCard.textContent = view.statusText;
@@ -371,7 +389,7 @@
       refs.statusError.textContent = view.healthError;
       refs.statusError.classList.toggle("hidden", !view.healthError);
       refs.forwardLabel.textContent = view.forwardLabel;
-      refs.forwardCard.textContent = view.forwardText;
+      refs.forwardCard.textContent = isUnmasked ? (view.forwardRaw || view.forwardText) : view.forwardText;
       refs.forwardCard.className = view.forwardMuted ? "summary-value muted" : "summary-value";
       refs.authLabel.textContent = view.authLabel;
       refs.authCard.textContent = view.authText;
@@ -440,6 +458,47 @@
         },
         state.listSignature,
       );
+
+      // Post-render: attach one eye toggle per tunnel item
+      const tunnels = state.snapshot?.tunnels ?? [];
+      const items = refs.list.querySelectorAll(".tunnel-item");
+      items.forEach((item, idx) => {
+        const tunnel = tunnels[idx];
+        if (!tunnel) return;
+        const tid = tunnel.definition?.id;
+        const maskKey = `tunnel-${tid}`;
+        const isUnmasked = unmaskedIps.has(maskKey);
+        const itemView = describeTunnelListItem(tunnel, state.selectedId);
+
+        // Update subtitle/forward text based on mask state
+        const subtitle = item.querySelector(".tunnel-subtitle");
+        if (subtitle) {
+          subtitle.textContent = isUnmasked ? itemView.subtitleRaw : itemView.subtitle;
+        }
+        const forward = item.querySelector(".tunnel-forward");
+        if (forward) {
+          forward.textContent = isUnmasked ? itemView.forwardRaw : itemView.forwardText;
+        }
+
+        // Add single eye button if not already present
+        if (!item.querySelector(".ip-eye-btn")) {
+          const eyeBtn = document.createElement("button");
+          eyeBtn.type = "button";
+          eyeBtn.className = "ip-eye-btn";
+          eyeBtn.title = "显示/隐藏 IP";
+          eyeBtn.innerHTML = isUnmasked
+            ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+            : '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+          eyeBtn.onclick = (e) => toggleIpMask(maskKey, e);
+          item.appendChild(eyeBtn);
+        } else {
+          const eyeBtn = item.querySelector(".ip-eye-btn");
+          eyeBtn.innerHTML = isUnmasked
+            ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+            : '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+          eyeBtn.onclick = (e) => toggleIpMask(maskKey, e);
+        }
+      });
     }
 
     function render() {
@@ -601,6 +660,22 @@
       if (!refs.themeIconLight || !refs.themeIconDark) return;
       refs.themeIconLight.classList.toggle("hidden", isDark);
       refs.themeIconDark.classList.toggle("hidden", !isDark);
+    }
+
+    if (refs.settingsBtn && refs.settingsModal) {
+      refs.settingsBtn.addEventListener("click", () => {
+        refs.settingsModal.showModal();
+      });
+      
+      refs.closeSettings.addEventListener("click", () => {
+        refs.settingsModal.close();
+      });
+      
+      refs.settingsModal.addEventListener("click", (e) => {
+        if (e.target === refs.settingsModal) {
+          refs.settingsModal.close();
+        }
+      });
     }
 
     if (refs.themeToggle) {

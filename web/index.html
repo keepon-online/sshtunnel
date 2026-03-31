@@ -32,28 +32,17 @@
 
       <div class="control-actions">
         <button id="new-tunnel">新建隧道</button>
-        <button id="theme-toggle" class="secondary icon-button" style="min-width: unset; padding: 10px 14px; margin-left: auto;" aria-label="切换主题" title="切换主题">
+        <div style="flex: 1;"></div>
+        <button id="settings-btn" class="secondary icon-button" style="min-width: unset; padding: 10px 14px;" aria-label="全局设置" title="全局设置">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+
+        <button id="theme-toggle" class="secondary icon-button" style="min-width: unset; padding: 10px 14px;" aria-label="切换主题" title="切换主题">
           <svg id="theme-icon-light" class="theme-icon hidden" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
           <svg id="theme-icon-dark" class="theme-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         </button>
       </div>
 
-      <section class="meta-card">
-        <p class="eyebrow">全局状态</p>
-        <div class="meta-row compact">
-          <span>系统 SSH</span>
-          <strong id="ssh-status">检查中</strong>
-        </div>
-        <div class="meta-row compact">
-          <span>开机自启</span>
-          <strong id="autostart-status">检查中</strong>
-        </div>
-        <div class="meta-row">
-          <span>配置文件</span>
-          <code id="config-path">-</code>
-        </div>
-        <button id="autostart-toggle" type="button" class="secondary meta-button">检查中</button>
-      </section>
 
       <section class="list-section">
         <div class="list-head">
@@ -86,25 +75,37 @@
             <p id="status-label" class="eyebrow">连接状态</p>
             <div id="status-card" class="status-card idle">未选择</div>
           </div>
-        </section>
+          <div class="hero-properties">
+            <div class="property-row">
+              <div class="property-cell">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="property-icon"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <span id="forward-label" class="eyebrow inline">本地转发</span>
+              </div>
+              <div id="forward-card" class="summary-value muted font-mono text-sm">选择隧道后显示转发目标</div>
+            </div>
 
-        <section class="support-grid">
-          <article class="support-card">
-            <p id="forward-label" class="eyebrow">本地转发</p>
-            <div id="forward-card" class="summary-value muted">选择隧道后显示转发目标</div>
-          </article>
+            <div class="property-row">
+              <div class="property-cell">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="property-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                <span id="auth-label" class="eyebrow inline">认证方式</span>
+              </div>
+              <div class="property-content-group">
+                <div id="auth-card" class="summary-value muted text-sm">选择隧道后显示认证方式</div>
+                <div id="auth-meta" class="summary-meta text-xs"></div>
+              </div>
+            </div>
 
-          <article class="support-card">
-            <p id="auth-label" class="eyebrow">认证方式</p>
-            <div id="auth-card" class="summary-value muted">选择隧道后显示认证方式</div>
-            <div id="auth-meta" class="summary-meta"></div>
-          </article>
-
-          <article class="support-card">
-            <p class="eyebrow">连接健康</p>
-            <div id="status-subtitle" class="status-subtitle muted">从左侧选择现有隧道，或创建一个新的本地转发配置。</div>
-            <div id="status-error" class="status-error hidden"></div>
-          </article>
+            <div class="property-row last">
+              <div class="property-cell">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="property-icon"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                <span class="eyebrow inline">连接健康</span>
+              </div>
+              <div class="property-content-group">
+                <div id="status-subtitle" class="status-subtitle muted text-sm">从左侧选择现有隧道，或创建一个新的转发配置。</div>
+                <div id="status-error" class="status-error hidden"></div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="timeline-card">
@@ -222,6 +223,33 @@
       </div>
     </form>
   </aside>
+
+  <dialog id="settings-modal" class="settings-modal">
+    <div class="settings-head">
+      <h2 class="settings-title">全局偏好设置</h2>
+      <button id="close-settings" type="button" class="secondary icon-button" aria-label="关闭" title="关闭">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-section">
+        <h3 class="eyebrow">系统环境与常驻</h3>
+        <div class="meta-row compact">
+          <span>系统 SSH 可执行文件</span>
+          <strong id="ssh-status">检查中</strong>
+        </div>
+        <div class="meta-row compact">
+          <span>自启动策略 (开机自启)</span>
+          <strong id="autostart-status">检查中</strong>
+        </div>
+        <button id="autostart-toggle" type="button" class="secondary meta-button full-width-btn" style="margin-top: 12px;">检查中</button>
+      </div>
+      <div class="settings-section">
+        <h3 class="eyebrow">配置文件路径</h3>
+        <code id="config-path" class="path-code">-</code>
+      </div>
+    </div>
+  </dialog>
 
   <script src="./view-model.js"></script>
   <script src="./app.js"></script>

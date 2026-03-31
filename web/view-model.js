@@ -7,6 +7,21 @@
 
   root.SshTunnelViewModel = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
+  function formatIp(ip) {
+    if (!ip) return "";
+    const ipv4Match = ip.match(/^(\d{1,3})\.\d{1,3}\.\d{1,3}\.(\d{1,3})$/);
+    if (ipv4Match) {
+      return `${ipv4Match[1]}.***.***.${ipv4Match[2]}`;
+    }
+    if (ip.includes('.')) {
+      const parts = ip.split('.');
+      if (parts.length >= 2) {
+        return `${parts[0]}.***.${parts[parts.length - 1]}`;
+      }
+    }
+    return "****";
+  }
+
   function describeAutostart(enabled) {
     return enabled
       ? {
@@ -76,9 +91,12 @@
     const definition = tunnel?.definition ?? {};
 
     return {
+      id: definition.id,
       title: definition.name ?? "",
-      subtitle: `${definition.username ?? ""}@${definition.ssh_host ?? ""}`,
-      forwardText: `${definition.local_bind_port ?? ""} -> ${definition.remote_host ?? ""}:${definition.remote_port ?? ""}`,
+      subtitleRaw: `${definition.username ?? ""}@${definition.ssh_host ?? ""}`,
+      subtitle: `${definition.username ?? ""}@${formatIp(definition.ssh_host)}`,
+      forwardRaw: `${definition.local_bind_port ?? ""} -> ${definition.remote_host ?? ""}:${definition.remote_port ?? ""}`,
+      forwardText: `${definition.local_bind_port ?? ""} -> ${formatIp(definition.remote_host)}:${definition.remote_port ?? ""}`,
       badgeTone: statusCopy.tone,
       badgeText: statusCopy.text,
       isActive: definition.id === selectedId,
@@ -98,7 +116,8 @@
     const statusCopy = describeTunnelStatus(tunnel.status);
     return {
       title: tunnel.definition?.name ?? "",
-      subtitle: `${tunnel.definition?.username ?? ""}@${tunnel.definition?.ssh_host ?? ""}`,
+      subtitleRaw: `${tunnel.definition?.username ?? ""}@${tunnel.definition?.ssh_host ?? ""}`,
+      subtitle: `${tunnel.definition?.username ?? ""}@${formatIp(tunnel.definition?.ssh_host)}`,
       statusText: statusCopy.text,
       statusTone: statusCopy.tone,
     };
@@ -140,10 +159,12 @@
       primaryLabel: "连接状态",
       primaryTone: statusCopy.tone,
       primaryText: statusCopy.text,
-      primarySubtitle: `${definition.username ?? ""}@${definition.ssh_host ?? ""}`,
+      primarySubtitleRaw: `${definition.username ?? ""}@${definition.ssh_host ?? ""}`,
+      primarySubtitle: `${definition.username ?? ""}@${formatIp(definition.ssh_host)}`,
       errorText: tunnel.last_error ?? "",
       forwardLabel: "本地转发",
-      forwardText: `${definition.local_bind_address ?? ""}:${definition.local_bind_port ?? ""} -> ${definition.remote_host ?? ""}:${definition.remote_port ?? ""}`,
+      forwardRaw: `${definition.local_bind_address ?? ""}:${definition.local_bind_port ?? ""} -> ${definition.remote_host ?? ""}:${definition.remote_port ?? ""}`,
+      forwardText: `${definition.local_bind_address ?? ""}:${definition.local_bind_port ?? ""} -> ${formatIp(definition.remote_host)}:${definition.remote_port ?? ""}`,
       authLabel: "认证方式",
       authText: definition.auth_kind === "password" ? "密码认证" : "密钥认证",
       authMeta: `自动重连: ${definition.auto_reconnect ? "开启" : "关闭"}`,
