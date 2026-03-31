@@ -23,7 +23,8 @@ use managed_process::ManagedProcess;
 use serde::{Deserialize, Serialize};
 use sshtunnel_core::{
     models::{AuthKind, TunnelDefinition},
-    ssh_launch::build_launch_plan,
+    ssh_args::build_ssh_probe_args,
+    ssh_launch::{build_launch_plan, CommandSpec, LaunchPlan},
 };
 use tauri::{
     menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
@@ -38,6 +39,12 @@ use tray_model::{
 const SERVICE_NAME: &str = "sshtunnel-manager";
 const MAIN_WINDOW_LABEL: &str = "main";
 const MAIN_TRAY_ID: &str = "main-tray";
+const TEST_LOG_LIMIT: usize = 24;
+const CONNECTIVITY_TEST_TIMEOUT: Duration = Duration::from_secs(15);
+const SSH_LOGIN_OK_MARKER: &str = "__SSHTUNNEL_LOGIN_OK__";
+const TARGET_OK_MARKER: &str = "__SSHTUNNEL_TARGET_OK__";
+const TARGET_FAIL_MARKER: &str = "__SSHTUNNEL_TARGET_FAIL__";
+const TARGET_TOOL_MISSING_MARKER: &str = "__SSHTUNNEL_TARGET_TOOL_MISSING__";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -61,6 +68,7 @@ struct AppSnapshot {
     ssh_available: bool,
     autostart_enabled: bool,
     config_path: String,
+    test_recent_log: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -69,10 +77,38 @@ struct PreparedConnect {
     password: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ConnectivityTestResult {
+    ssh_ok: bool,
+    target_ok: bool,
+    summary: String,
+    ssh_summary: String,
+    target_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConnectivityTestResponse {
+    snapshot: AppSnapshot,
+    result: ConnectivityTestResult,
+}
+
 #[derive(Debug)]
 enum ConnectPreparation {
     Launch(PreparedConnect),
     MissingCredential,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectivityProbeKind {
+    SshLogin,
+    TargetReachability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConnectivityProbeResult {
+    ok: bool,
+    summary: String,
+    logs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +152,7 @@ struct InnerState {
 struct AppState {
     config_path: PathBuf,
     inner: Mutex<InnerState>,
+    test_recent_log: Mutex<Vec<String>>,
     tray_menu_signature: Mutex<Option<String>>,
 }
 
@@ -131,6 +168,7 @@ impl AppState {
                 tunnels,
                 runtimes: HashMap::new(),
             }),
+            test_recent_log: Mutex::new(Vec::new()),
             tray_menu_signature: Mutex::new(None),
         }
     }
@@ -175,6 +213,31 @@ fn save_tunnel(
 }
 
 #[tauri::command]
+fn test_tunnel_connectivity(
+    app: tauri::AppHandle,
+    payload: SaveTunnelPayload,
+    state: State<'_, AppState>,
+) -> Result<ConnectivityTestResponse, String> {
+    ensure_ssh_available()?;
+
+    let prepared = prepare_tunnel_for_test(payload)?;
+    let (result, logs) = run_connectivity_test_with_runner(&prepared, run_connectivity_probe)?;
+
+    {
+        let mut test_recent_log = state
+            .test_recent_log
+            .lock()
+            .map_err(|_| "test log state poisoned".to_string())?;
+        *test_recent_log = trim_recent_logs(logs, TEST_LOG_LIMIT);
+    }
+
+    Ok(ConnectivityTestResponse {
+        snapshot: snapshot(&state, &app)?,
+        result,
+    })
+}
+
+#[tauri::command]
 fn delete_tunnel(
     app: tauri::AppHandle,
     id: String,
@@ -209,7 +272,7 @@ fn connect_tunnel(
     launch_tunnel(&mut inner, &id, get_password)?;
 
     refresh_tray_menu(&app, &inner)?;
-    snapshot_from_inner(&state.config_path, &app, &mut inner)
+    snapshot_from_inner(&state, &app, &mut inner)
 }
 
 #[tauri::command]
@@ -224,7 +287,7 @@ fn disconnect_tunnel(
         .map_err(|_| "state poisoned".to_string())?;
     apply_disconnect(&mut inner, &id);
     refresh_tray_menu(&app, &inner)?;
-    snapshot_from_inner(&state.config_path, &app, &mut inner)
+    snapshot_from_inner(&state, &app, &mut inner)
 }
 
 #[tauri::command]
@@ -359,6 +422,24 @@ fn prepare_tunnel_for_save(mut tunnel: TunnelDefinition) -> Result<TunnelDefinit
 
     tunnel.validate()?;
     Ok(tunnel)
+}
+
+fn prepare_tunnel_for_test(payload: SaveTunnelPayload) -> Result<PreparedConnect, String> {
+    let tunnel = prepare_tunnel_for_save(payload.tunnel)?;
+    let password = payload.password.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+
+    if tunnel.auth_kind == AuthKind::Password && password.is_none() {
+        return Err("password auth requires a password value".into());
+    }
+
+    Ok(PreparedConnect { tunnel, password })
 }
 
 fn ensure_password_credential_for_save<F>(
@@ -569,11 +650,7 @@ fn delete_tunnel_from_inner(inner: &mut InnerState, id: &str) {
 }
 
 fn push_log(runtime: &mut TunnelRuntime, entry: &str) {
-    runtime.recent_log.push(entry.to_string());
-    if runtime.recent_log.len() > 12 {
-        let trim = runtime.recent_log.len() - 12;
-        runtime.recent_log.drain(0..trim);
-    }
+    push_recent_entry(&mut runtime.recent_log, entry.to_string(), 12);
 }
 
 fn touch_recent_tunnel(inner: &mut InnerState, id: &str) {
@@ -747,6 +824,302 @@ fn flush_process_logs(runtime: &mut TunnelRuntime) -> Result<(), String> {
     Ok(())
 }
 
+fn push_recent_entry(entries: &mut Vec<String>, entry: String, limit: usize) {
+    entries.push(entry);
+    if entries.len() > limit {
+        let trim = entries.len() - limit;
+        entries.drain(0..trim);
+    }
+}
+
+fn trim_recent_logs(entries: Vec<String>, limit: usize) -> Vec<String> {
+    let mut trimmed = Vec::new();
+    for entry in entries {
+        push_recent_entry(&mut trimmed, entry, limit);
+    }
+    trimmed
+}
+
+fn run_connectivity_test_with_runner<F>(
+    prepared: &PreparedConnect,
+    mut runner: F,
+) -> Result<(ConnectivityTestResult, Vec<String>), String>
+where
+    F: FnMut(
+        &TunnelDefinition,
+        Option<&str>,
+        ConnectivityProbeKind,
+    ) -> Result<ConnectivityProbeResult, String>,
+{
+    let mut logs = vec![format!(
+        "[测试状态] 开始测试 {}: {}@{} -> {}:{}",
+        prepared.tunnel.name,
+        prepared.tunnel.username,
+        prepared.tunnel.ssh_host,
+        prepared.tunnel.remote_host,
+        prepared.tunnel.remote_port
+    )];
+
+    let ssh_result = runner(
+        &prepared.tunnel,
+        prepared.password.as_deref(),
+        ConnectivityProbeKind::SshLogin,
+    )?;
+    append_connectivity_probe_logs(&mut logs, &ssh_result.logs);
+
+    if !ssh_result.ok {
+        let summary = format!("SSH 登录失败：{}", ssh_result.summary);
+        logs.push(format!("[测试状态] {summary}"));
+        return Ok((
+            ConnectivityTestResult {
+                ssh_ok: false,
+                target_ok: false,
+                summary,
+                ssh_summary: ssh_result.summary,
+                target_summary: None,
+            },
+            logs,
+        ));
+    }
+
+    logs.push(format!("[测试状态] SSH 登录成功：{}", ssh_result.summary));
+
+    let target_result = runner(
+        &prepared.tunnel,
+        prepared.password.as_deref(),
+        ConnectivityProbeKind::TargetReachability,
+    )?;
+    append_connectivity_probe_logs(&mut logs, &target_result.logs);
+
+    let (summary, target_status_line) = if target_result.ok {
+        (
+            "SSH 登录成功，远端目标可达。".to_string(),
+            format!("[测试状态] 远端目标可达：{}", target_result.summary),
+        )
+    } else {
+        (
+            format!("SSH 登录成功，但远端目标不可达：{}", target_result.summary),
+            format!("[测试状态] 远端目标不可达：{}", target_result.summary),
+        )
+    };
+
+    logs.push(target_status_line);
+
+    Ok((
+        ConnectivityTestResult {
+            ssh_ok: true,
+            target_ok: target_result.ok,
+            summary,
+            ssh_summary: ssh_result.summary,
+            target_summary: Some(target_result.summary),
+        },
+        logs,
+    ))
+}
+
+fn append_connectivity_probe_logs(entries: &mut Vec<String>, logs: &[String]) {
+    for line in logs {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || is_probe_marker_line(trimmed) {
+            continue;
+        }
+        entries.push(format!("[测试输出] {trimmed}"));
+    }
+}
+
+fn is_probe_marker_line(line: &str) -> bool {
+    [
+        SSH_LOGIN_OK_MARKER,
+        TARGET_OK_MARKER,
+        TARGET_FAIL_MARKER,
+        TARGET_TOOL_MISSING_MARKER,
+    ]
+    .iter()
+    .any(|marker| line.contains(marker))
+}
+
+fn run_connectivity_probe(
+    tunnel: &TunnelDefinition,
+    password: Option<&str>,
+    kind: ConnectivityProbeKind,
+) -> Result<ConnectivityProbeResult, String> {
+    let remote_command = build_connectivity_probe_remote_command(tunnel, kind);
+    let plan = build_connectivity_probe_launch_plan(tunnel, password, &remote_command)?;
+    let mut process = ManagedProcess::spawn(plan)?;
+    let deadline = SystemTime::now() + CONNECTIVITY_TEST_TIMEOUT;
+    let mut logs = Vec::new();
+
+    loop {
+        logs.extend(process.take_logs());
+
+        if let Some(status) = process.try_wait()? {
+            logs.extend(process.take_logs());
+            return Ok(parse_connectivity_probe_result(kind, &status, logs));
+        }
+
+        if SystemTime::now() >= deadline {
+            let _ = process.kill();
+            logs.extend(process.take_logs());
+            logs.push("connectivity probe timed out".into());
+            return Ok(ConnectivityProbeResult {
+                ok: false,
+                summary: "测试超时".into(),
+                logs,
+            });
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn build_connectivity_probe_launch_plan(
+    tunnel: &TunnelDefinition,
+    password: Option<&str>,
+    remote_command: &str,
+) -> Result<LaunchPlan, String> {
+    tunnel.validate()?;
+
+    let command = CommandSpec {
+        program: "ssh".to_string(),
+        args: build_ssh_probe_args(tunnel, remote_command),
+    };
+
+    match tunnel.auth_kind {
+        AuthKind::PrivateKey => Ok(LaunchPlan::Native(command)),
+        AuthKind::Password => {
+            let password = password
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "password auth requires a password value".to_string())?;
+
+            Ok(LaunchPlan::PromptedPassword {
+                command,
+                password: password.to_string(),
+                prompt: "assword:".to_string(),
+            })
+        }
+    }
+}
+
+fn build_connectivity_probe_remote_command(
+    tunnel: &TunnelDefinition,
+    kind: ConnectivityProbeKind,
+) -> String {
+    match kind {
+        ConnectivityProbeKind::SshLogin => {
+            let script = format!("printf '%s\\n' \"{SSH_LOGIN_OK_MARKER}\" >&2");
+            format!("sh -lc {}", shell_single_quote(&script))
+        }
+        ConnectivityProbeKind::TargetReachability => {
+            let host_quoted = shell_single_quote(&tunnel.remote_host);
+            let host_for_dev_tcp = tunnel
+                .remote_host
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"");
+            let script = format!(
+                "if command -v nc >/dev/null 2>&1; then \
+                    nc -z -w 5 {host_quoted} {port} >/dev/null 2>&1 && printf '%s\\n' \"{ok}\" >&2 || {{ code=$?; printf '%s\\n' \"{fail}\" >&2; exit \"$code\"; }}; \
+                elif command -v bash >/dev/null 2>&1; then \
+                    bash -lc \"exec 3<>/dev/tcp/{host_for_dev_tcp}/{port}\" >/dev/null 2>&1 && printf '%s\\n' \"{ok}\" >&2 || {{ code=$?; printf '%s\\n' \"{fail}\" >&2; exit \"$code\"; }}; \
+                else \
+                    printf '%s\\n' \"{missing}\" >&2; exit 9; \
+                fi",
+                port = tunnel.remote_port,
+                ok = TARGET_OK_MARKER,
+                fail = TARGET_FAIL_MARKER,
+                missing = TARGET_TOOL_MISSING_MARKER,
+            );
+            format!("sh -lc {}", shell_single_quote(&script))
+        }
+    }
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn parse_connectivity_probe_result(
+    kind: ConnectivityProbeKind,
+    status: &str,
+    logs: Vec<String>,
+) -> ConnectivityProbeResult {
+    let success = command_status_is_success(status);
+
+    match kind {
+        ConnectivityProbeKind::SshLogin => {
+            if logs.iter().any(|line| line.contains(SSH_LOGIN_OK_MARKER)) {
+                ConnectivityProbeResult {
+                    ok: true,
+                    summary: "已完成 SSH 握手".into(),
+                    logs,
+                }
+            } else {
+                ConnectivityProbeResult {
+                    ok: false,
+                    summary: summarize_probe_failure(&logs, status, "SSH 登录未通过"),
+                    logs,
+                }
+            }
+        }
+        ConnectivityProbeKind::TargetReachability => {
+            if logs.iter().any(|line| line.contains(TARGET_OK_MARKER)) {
+                ConnectivityProbeResult {
+                    ok: true,
+                    summary: "远端目标可达".into(),
+                    logs,
+                }
+            } else if logs
+                .iter()
+                .any(|line| line.contains(TARGET_TOOL_MISSING_MARKER))
+            {
+                ConnectivityProbeResult {
+                    ok: false,
+                    summary: "远端主机缺少 nc 或 bash，无法检查目标端口".into(),
+                    logs,
+                }
+            } else if logs.iter().any(|line| line.contains(TARGET_FAIL_MARKER)) || !success {
+                ConnectivityProbeResult {
+                    ok: false,
+                    summary: summarize_probe_failure(&logs, status, "远端目标不可达"),
+                    logs,
+                }
+            } else {
+                ConnectivityProbeResult {
+                    ok: false,
+                    summary: "远端目标检查未返回成功标记".into(),
+                    logs,
+                }
+            }
+        }
+    }
+}
+
+fn summarize_probe_failure(logs: &[String], status: &str, fallback: &str) -> String {
+    logs.iter()
+        .rev()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || is_probe_marker_line(trimmed) {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .unwrap_or_else(|| {
+            if status.trim().is_empty() {
+                fallback.to_string()
+            } else {
+                format!("{fallback} ({status})")
+            }
+        })
+}
+
+fn command_status_is_success(status: &str) -> bool {
+    let lower = status.to_ascii_lowercase();
+    lower.contains("exit status: 0")
+        || lower.contains("code: 0")
+        || lower.contains("unix_wait_status(0)")
+}
+
 fn autostart_enabled(app: &tauri::AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
@@ -756,11 +1129,11 @@ fn snapshot(state: &AppState, app: &tauri::AppHandle) -> Result<AppSnapshot, Str
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
-    snapshot_from_inner(&state.config_path, app, &mut inner)
+    snapshot_from_inner(state, app, &mut inner)
 }
 
 fn snapshot_from_inner(
-    config_path: &PathBuf,
+    state: &AppState,
     app: &tauri::AppHandle,
     inner: &mut InnerState,
 ) -> Result<AppSnapshot, String> {
@@ -782,7 +1155,12 @@ fn snapshot_from_inner(
         tunnels,
         ssh_available: ensure_ssh_available().is_ok(),
         autostart_enabled: autostart_enabled(app),
-        config_path: config_path.display().to_string(),
+        config_path: state.config_path.display().to_string(),
+        test_recent_log: state
+            .test_recent_log
+            .lock()
+            .map_err(|_| "test log state poisoned".to_string())?
+            .clone(),
     })
 }
 
@@ -931,6 +1309,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_tunnel,
+            test_tunnel_connectivity,
             delete_tunnel,
             connect_tunnel,
             disconnect_tunnel,
@@ -1590,6 +1969,81 @@ mod command_flow_tests {
         let ids = super::collect_auto_connect_ids(&[db, cache, metrics]);
 
         assert_eq!(ids, vec!["db".to_string(), "metrics".to_string()]);
+    }
+
+    #[test]
+    fn run_connectivity_test_short_circuits_after_ssh_login_failure() {
+        let prepared = super::prepare_tunnel_for_test(super::SaveTunnelPayload {
+            tunnel: password_tunnel("db"),
+            password: Some("s3cr3t".into()),
+        })
+        .expect("prepare password test payload");
+        let mut seen = Vec::new();
+
+        let (result, logs) =
+            super::run_connectivity_test_with_runner(&prepared, |_, _, kind| {
+                seen.push(kind);
+                Ok(match kind {
+                    super::ConnectivityProbeKind::SshLogin => super::ConnectivityProbeResult {
+                        ok: false,
+                        summary: "Permission denied".into(),
+                        logs: vec!["Permission denied".into()],
+                    },
+                    super::ConnectivityProbeKind::TargetReachability => {
+                        panic!("target probe should not run after ssh failure")
+                    }
+                })
+            })
+            .expect("run connectivity test");
+
+        assert_eq!(seen, vec![super::ConnectivityProbeKind::SshLogin]);
+        assert!(!result.ssh_ok);
+        assert!(!result.target_ok);
+        assert!(result.summary.contains("SSH 登录失败"));
+        assert!(logs.iter().any(|line| line.contains("[测试状态] SSH 登录失败")));
+    }
+
+    #[test]
+    fn run_connectivity_test_reports_target_failure_after_ssh_login_success() {
+        let prepared = super::prepare_tunnel_for_test(super::SaveTunnelPayload {
+            tunnel: password_tunnel("db"),
+            password: Some("s3cr3t".into()),
+        })
+        .expect("prepare password test payload");
+        let mut seen = Vec::new();
+
+        let (result, logs) =
+            super::run_connectivity_test_with_runner(&prepared, |_, _, kind| {
+                seen.push(kind);
+                Ok(match kind {
+                    super::ConnectivityProbeKind::SshLogin => super::ConnectivityProbeResult {
+                        ok: true,
+                        summary: "SSH login ok".into(),
+                        logs: vec!["__SSHTUNNEL_LOGIN_OK__".into()],
+                    },
+                    super::ConnectivityProbeKind::TargetReachability => {
+                        super::ConnectivityProbeResult {
+                            ok: false,
+                            summary: "remote target unreachable".into(),
+                            logs: vec!["Connection refused".into()],
+                        }
+                    }
+                })
+            })
+            .expect("run connectivity test");
+
+        assert_eq!(
+            seen,
+            vec![
+                super::ConnectivityProbeKind::SshLogin,
+                super::ConnectivityProbeKind::TargetReachability,
+            ]
+        );
+        assert!(result.ssh_ok);
+        assert!(!result.target_ok);
+        assert!(result.summary.contains("远端目标"));
+        assert!(logs.iter().any(|line| line.contains("[测试状态] SSH 登录成功")));
+        assert!(logs.iter().any(|line| line.contains("[测试状态] 远端目标不可达")));
     }
 
     #[test]

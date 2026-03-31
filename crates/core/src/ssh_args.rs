@@ -1,9 +1,7 @@
 use crate::models::{AuthKind, TunnelDefinition};
 
-pub fn build_ssh_args(tunnel: &TunnelDefinition) -> Vec<String> {
+fn build_ssh_base_args(tunnel: &TunnelDefinition) -> Vec<String> {
     let mut args = vec![
-        "-N".to_string(),
-        "-T".to_string(),
         "-p".to_string(),
         tunnel.ssh_port.to_string(),
         "-o".to_string(),
@@ -34,12 +32,27 @@ pub fn build_ssh_args(tunnel: &TunnelDefinition) -> Vec<String> {
         }
     }
 
+    args
+}
+
+pub fn build_ssh_args(tunnel: &TunnelDefinition) -> Vec<String> {
+    let mut args = vec!["-N".to_string(), "-T".to_string()];
+    args.extend(build_ssh_base_args(tunnel));
     args.push("-L".to_string());
     args.push(format!(
         "{}:{}:{}:{}",
         tunnel.local_bind_address, tunnel.local_bind_port, tunnel.remote_host, tunnel.remote_port
     ));
     args.push(format!("{}@{}", tunnel.username, tunnel.ssh_host));
+
+    args
+}
+
+pub fn build_ssh_probe_args(tunnel: &TunnelDefinition, remote_command: &str) -> Vec<String> {
+    let mut args = vec!["-T".to_string()];
+    args.extend(build_ssh_base_args(tunnel));
+    args.push(format!("{}@{}", tunnel.username, tunnel.ssh_host));
+    args.push(remote_command.to_string());
 
     args
 }

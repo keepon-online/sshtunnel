@@ -5,16 +5,19 @@ const path = require("node:path");
 
 const {
   buildCommandCenterView,
+  describeConnectivityResult,
   mapStatusSummaryToCommandCenterCards,
   DESKTOP_ONLY_MESSAGE,
   createTunnelListNode,
   renderTunnelList,
   createDesktopBridge,
   fillPrivateKeyPath,
+  mergeTimelineLogs,
   shouldRefreshSnapshot,
   setEditorError,
   validateTunnelPayload,
 } = require("../app.js");
+const { describeDiagnosticLogPanel } = require("../view-model.js");
 
 function fakeMessageNode() {
   return {
@@ -229,8 +232,8 @@ test("buildCommandCenterView returns empty-state render model without selected t
     },
     {
       summaryText: "暂无最近日志",
-      statusEvents: [{ text: "ignored", tone: "default" }],
-      sshOutput: [{ text: "ignored", tone: "default" }],
+      statusEvents: [],
+      sshOutput: [],
       emptyStatusText: "暂无状态事件",
       emptySshText: "暂无 SSH 输出",
     },
@@ -257,6 +260,37 @@ test("buildCommandCenterView returns empty-state render model without selected t
     emptyStatusText: "从左侧选择一条隧道后显示状态事件。",
     emptySshText: "从左侧选择一条隧道后显示 SSH 输出。",
   });
+});
+
+test("buildCommandCenterView keeps timeline visible for app-level test logs without a selected tunnel", () => {
+  const view = buildCommandCenterView(
+    null,
+    {
+      title: "选择一个隧道",
+      subtitle: "从左侧选择现有隧道，或创建一个新的本地转发配置。",
+      statusTone: "idle",
+      statusText: "未选择",
+    },
+    {
+      forwardLabel: "本地转发",
+      forwardValue: "选择隧道后显示转发目标",
+      authLabel: "认证方式",
+      authValue: "选择隧道后显示认证方式",
+      healthValue: "无数据",
+    },
+    {
+      summaryText: "最近 1 条状态事件，1 条 SSH 输出",
+      statusEvents: [{ text: "[测试状态] SSH 登录成功", tone: "default" }],
+      sshOutput: [{ text: "[测试输出] Connection refused", tone: "error" }],
+      emptyStatusText: "暂无状态事件",
+      emptySshText: "暂无 SSH 输出",
+    },
+  );
+
+  assert.equal(view.statusEvents.length, 1);
+  assert.equal(view.sshOutput.length, 1);
+  assert.equal(view.emptyStatusText, "暂无状态事件");
+  assert.equal(view.emptySshText, "暂无 SSH 输出");
 });
 
 test("buildCommandCenterView keeps reconnect detail visible in error state", () => {
@@ -342,6 +376,42 @@ test("mapStatusSummaryToCommandCenterCards keeps reconnect detail for healthy fa
     healthLabel: "连接健康",
     healthValue: "自动重连: 开启",
   });
+});
+
+test("mergeTimelineLogs appends app-level test logs after tunnel logs", () => {
+  assert.deepEqual(mergeTimelineLogs(["spawned ssh process"], ["[测试状态] SSH 登录成功"]), [
+    "spawned ssh process",
+    "[测试状态] SSH 登录成功",
+  ]);
+});
+
+test("describeConnectivityResult formats drawer copy for a failed probe", () => {
+  assert.deepEqual(
+    describeConnectivityResult({
+      ssh_ok: true,
+      target_ok: false,
+      summary: "SSH 登录成功，但远端目标不可达：Connection refused",
+      ssh_summary: "已完成 SSH 握手",
+      target_summary: "Connection refused",
+    }),
+    {
+      tone: "error",
+      title: "SSH 登录成功，但远端目标不可达：Connection refused",
+      details: ["SSH 登录：已完成 SSH 握手", "目标检查：Connection refused"],
+    },
+  );
+});
+
+test("describeDiagnosticLogPanel routes connectivity test status and output lines into separate lanes", () => {
+  const panel = describeDiagnosticLogPanel([
+    "[测试状态] SSH 登录成功",
+    "[测试输出] Connection refused",
+  ]);
+
+  assert.equal(panel.statusEvents.length, 1);
+  assert.equal(panel.statusEvents[0].text, "[测试状态] SSH 登录成功");
+  assert.equal(panel.sshOutput.length, 1);
+  assert.equal(panel.sshOutput[0].tone, "error");
 });
 
 test("styles keep select controls readable in dark theme", () => {

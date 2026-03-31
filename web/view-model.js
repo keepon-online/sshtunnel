@@ -174,6 +174,7 @@
   function describeDiagnosticLogPanel(lines) {
     const logLines = Array.isArray(lines) ? lines : [];
     const statusPatterns = [
+      "[测试状态]",
       "spawned ssh process",
       "stopped ssh process",
       "ssh process exited",
@@ -183,6 +184,11 @@
       "ssh exited with status",
     ];
     const errorPatterns = [
+      "失败",
+      "不可达",
+      "超时",
+      "缺少",
+      "拒绝",
       "error",
       "failed",
       "missing",
@@ -203,8 +209,11 @@
     const sshOutput = [];
 
     for (const line of logLines) {
-      if (statusPatterns.some((pattern) => line.toLowerCase().includes(pattern))) {
+      const lower = line.toLowerCase();
+      if (line.startsWith("[测试状态]") || statusPatterns.some((pattern) => lower.includes(pattern))) {
         statusEvents.push(toEntry(line));
+      } else if (line.startsWith("[测试输出]")) {
+        sshOutput.push(toEntry(line));
       } else {
         sshOutput.push(toEntry(line));
       }

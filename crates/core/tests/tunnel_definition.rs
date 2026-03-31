@@ -1,5 +1,5 @@
 use sshtunnel_core::models::{AuthKind, TunnelDefinition};
-use sshtunnel_core::ssh_args::build_ssh_args;
+use sshtunnel_core::ssh_args::{build_ssh_args, build_ssh_probe_args};
 
 fn valid_key_tunnel() -> TunnelDefinition {
     TunnelDefinition {
@@ -82,4 +82,17 @@ fn builds_password_command_without_private_key_flag() {
         !args.contains(&"-i".to_string()),
         "password auth should not inject key args"
     );
+}
+
+#[test]
+fn builds_probe_command_without_forwarding_flags() {
+    let tunnel = valid_key_tunnel();
+
+    let args = build_ssh_probe_args(&tunnel, "printf '__probe__\\n' >&2");
+
+    assert_eq!(args[0], "-T");
+    assert!(!args.contains(&"-N".to_string()));
+    assert!(!args.contains(&"-L".to_string()));
+    assert_eq!(args[args.len() - 2], "deploy@bastion.example.com");
+    assert_eq!(args.last().unwrap(), "printf '__probe__\\n' >&2");
 }

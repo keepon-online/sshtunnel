@@ -133,8 +133,37 @@
     return null;
   }
 
+  function mergeTimelineLogs(tunnelLogs, testLogs) {
+    return [...(Array.isArray(tunnelLogs) ? tunnelLogs : []), ...(Array.isArray(testLogs) ? testLogs : [])];
+  }
+
+  function describeConnectivityResult(result) {
+    if (!result) {
+      return null;
+    }
+
+    const success = Boolean(result.ssh_ok && result.target_ok);
+    const details = [];
+
+    if (result.ssh_summary) {
+      details.push(`SSH 登录：${result.ssh_summary}`);
+    }
+
+    if (result.target_summary) {
+      details.push(`目标检查：${result.target_summary}`);
+    }
+
+    return {
+      tone: success ? "success" : "error",
+      title: result.summary || (success ? "测试通过" : "测试失败"),
+      details,
+    };
+  }
+
   function buildCommandCenterView(tunnel, hero, cards, timeline) {
     const hasTunnel = Boolean(tunnel);
+    const hasTimeline = Boolean((timeline?.statusEvents?.length ?? 0) || (timeline?.sshOutput?.length ?? 0));
+    const showTimeline = hasTunnel || hasTimeline;
     const statusTone = hero?.statusTone ?? "idle";
     const isError = hasTunnel && statusTone === "error";
 
@@ -154,12 +183,12 @@
       healthText: isError ? "连接异常，请处理后重试。" : cards?.healthValue ?? "无数据",
       healthError: isError ? cards?.healthValue ?? "" : "",
       logSummary: timeline?.summaryText ?? "暂无最近日志",
-      statusEvents: hasTunnel ? timeline?.statusEvents ?? [] : [],
-      sshOutput: hasTunnel ? timeline?.sshOutput ?? [] : [],
-      emptyStatusText: hasTunnel
+      statusEvents: showTimeline ? timeline?.statusEvents ?? [] : [],
+      sshOutput: showTimeline ? timeline?.sshOutput ?? [] : [],
+      emptyStatusText: showTimeline
         ? timeline?.emptyStatusText ?? "暂无状态事件"
         : "从左侧选择一条隧道后显示状态事件。",
-      emptySshText: hasTunnel
+      emptySshText: showTimeline
         ? timeline?.emptySshText ?? "暂无 SSH 输出"
         : "从左侧选择一条隧道后显示 SSH 输出。",
     };
@@ -292,6 +321,8 @@
       editorOpen: false,
       editingId: null,
       listSignature: null,
+      testingConnectivity: false,
+      connectivityResult: null,
     };
 
     const refs = {
@@ -305,6 +336,7 @@
       formTitle: document.getElementById("form-title"),
       form: document.getElementById("tunnel-form"),
       saveTunnel: document.getElementById("save-tunnel"),
+      testConnectivity: document.getElementById("test-connectivity"),
       statusLabel: document.getElementById("status-label"),
       statusCard: document.getElementById("status-card"),
       statusSubtitle: document.getElementById("status-subtitle"),
@@ -333,6 +365,9 @@
       closeDrawer: document.getElementById("close-drawer"),
       cancelEdit: document.getElementById("cancel-edit"),
       editorError: document.getElementById("editor-error"),
+      testResult: document.getElementById("test-result"),
+      testResultTitle: document.getElementById("test-result-title"),
+      testResultDetails: document.getElementById("test-result-details"),
       pickPrivateKey: document.getElementById("pick-private-key"),
       privateKeyPath: document.getElementById("private-key-path"),
       authKind: document.getElementById("auth-kind"),
@@ -372,7 +407,9 @@
     function renderWorkspace(tunnel) {
       const hero = describeCommandCenterHero(tunnel);
       const cards = describeCommandCenterCards(tunnel);
-      const timeline = describeCommandCenterTimeline(tunnel?.recent_log ?? []);
+      const timeline = describeCommandCenterTimeline(
+        mergeTimelineLogs(tunnel?.recent_log ?? [], state.snapshot?.test_recent_log ?? []),
+      );
       const view = buildCommandCenterView(tunnel, hero, cards, timeline);
 
       refs.workspaceTitle.textContent = view.title;
@@ -402,6 +439,37 @@
       renderLogSection(refs.sshOutputLog, view.sshOutput, view.emptySshText);
     }
 
+    function renderConnectivityResult() {
+      const view = describeConnectivityResult(state.connectivityResult);
+      refs.testResultTitle.textContent = "";
+      refs.testResultDetails.innerHTML = "";
+
+      if (!view) {
+        refs.testResult.className = "test-result hidden full-width";
+        return;
+      }
+
+      refs.testResult.className = `test-result full-width ${view.tone}`;
+      refs.testResultTitle.textContent = view.title;
+
+      for (const detail of view.details) {
+        const line = document.createElement("div");
+        line.className = "test-result-detail";
+        line.textContent = detail;
+        refs.testResultDetails.appendChild(line);
+      }
+    }
+
+    function renderEditorActions() {
+      refs.testConnectivity.disabled = state.testingConnectivity;
+      refs.testConnectivity.textContent = state.testingConnectivity ? "测试中..." : "测试连接";
+    }
+
+    function resetConnectivityResult() {
+      state.connectivityResult = null;
+      renderConnectivityResult();
+    }
+
     function fillForm(tunnel) {
       const editorCopy = describeEditorSheet(tunnel);
       refs.formTitle.textContent = editorCopy.title;
@@ -427,8 +495,12 @@
     function openEditor(tunnel) {
       state.editorOpen = true;
       state.editingId = tunnel?.definition.id ?? null;
+      state.testingConnectivity = false;
+      state.connectivityResult = null;
       clearEditorError(refs);
       fillForm(tunnel);
+      renderEditorActions();
+      renderConnectivityResult();
       refs.drawerBackdrop.classList.remove("hidden");
       refs.editorDrawer.classList.remove("hidden");
       refs.editorDrawer.setAttribute("aria-hidden", "false");
@@ -438,7 +510,11 @@
     function closeEditor() {
       state.editorOpen = false;
       state.editingId = null;
+      state.testingConnectivity = false;
+      state.connectivityResult = null;
       clearEditorError(refs);
+      renderEditorActions();
+      renderConnectivityResult();
       refs.drawerBackdrop.classList.add("hidden");
       refs.editorDrawer.classList.add("hidden");
       refs.editorDrawer.setAttribute("aria-hidden", "true");
@@ -525,6 +601,9 @@
 
       if (!state.editorOpen) {
         closeEditor();
+      } else {
+        renderEditorActions();
+        renderConnectivityResult();
       }
     }
 
@@ -596,6 +675,33 @@
       }
     });
 
+    refs.testConnectivity.addEventListener("click", async () => {
+      clearEditorError(refs);
+      resetConnectivityResult();
+
+      try {
+        const payload = formPayload();
+        const validationError = validateTunnelPayload(payload);
+
+        if (validationError) {
+          setEditorError(refs, validationError);
+          return;
+        }
+
+        state.testingConnectivity = true;
+        renderEditorActions();
+        const response = await invoke("test_tunnel_connectivity", { payload });
+        state.snapshot = response.snapshot;
+        state.connectivityResult = response.result;
+        render();
+      } catch (error) {
+        setEditorError(refs, toErrorMessage(error));
+      } finally {
+        state.testingConnectivity = false;
+        renderEditorActions();
+      }
+    });
+
     refs.newTunnel.addEventListener("click", () => {
       openEditor(null);
     });
@@ -654,6 +760,16 @@
     refs.cancelEdit.addEventListener("click", closeEditor);
     refs.drawerBackdrop.addEventListener("click", closeEditor);
     refs.authKind.addEventListener("change", syncAuthFields);
+    refs.form.addEventListener("input", () => {
+      if (state.connectivityResult) {
+        resetConnectivityResult();
+      }
+    });
+    refs.form.addEventListener("change", () => {
+      if (state.connectivityResult) {
+        resetConnectivityResult();
+      }
+    });
 
     function syncThemeIcons() {
       const isDark = document.documentElement.getAttribute("data-theme") === "dark";
@@ -700,6 +816,7 @@
 
   return {
     buildCommandCenterView,
+    describeConnectivityResult,
     createTunnelListNode,
     renderTunnelList,
     mapStatusSummaryToCommandCenterCards,
@@ -710,6 +827,7 @@
     fillPrivateKeyPath,
     normalizeDialogSelection,
     shouldRefreshSnapshot,
+    mergeTimelineLogs,
     setEditorError,
     validateTunnelPayload,
   };
