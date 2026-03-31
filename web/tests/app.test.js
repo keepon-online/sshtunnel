@@ -347,13 +347,17 @@ test("mapStatusSummaryToCommandCenterCards keeps reconnect detail for healthy fa
 test("styles keep select controls readable in dark theme", () => {
   const css = fs.readFileSync(path.join(__dirname, "../styles.css"), "utf8");
 
+  assert.match(css, /:root,\s*:root\[data-theme="dark"\]\s*\{[\s\S]*--select-bg-color:\s*#111827;/);
   assert.match(css, /select\s*\{[\s\S]*appearance:\s*none;/);
   assert.match(css, /select\s*\{[\s\S]*-webkit-appearance:\s*none;/);
-  assert.match(css, /select\s*\{[\s\S]*background:\s*rgba\(0,\s*0,\s*0,\s*0\.2\)/);
-  assert.match(css, /select\s*\{[\s\S]*color:\s*#fff;/);
+  assert.match(css, /input,\s*[\r\n\s]*select\s*\{[\s\S]*background:\s*var\(--surface-layer\)/);
+  assert.match(css, /input,\s*[\r\n\s]*select\s*\{[\s\S]*color:\s*var\(--ink\)/);
+  assert.match(css, /select\s*\{[\s\S]*var\(--surface-layer\);/);
+  assert.match(css, /select option\s*\{[\s\S]*background:\s*var\(--select-bg-color\)/);
+  assert.match(css, /select option\s*\{[\s\S]*color:\s*var\(--ink\)/);
   assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{/);
   assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{[\s\S]*color:\s*var\(--muted\)/);
-  assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{[\s\S]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.04\)/);
+  assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{[\s\S]*background:\s*var\(--surface-layer\)/);
   assert.match(css, /label span\s*\{[\s\S]*color:\s*var\(--ink\)/);
   assert.match(css, /input::placeholder,\s*[\r\n\s]*select::placeholder\s*\{[\s\S]*color:\s*var\(--muted\)/);
 });
