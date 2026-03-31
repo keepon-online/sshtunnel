@@ -752,7 +752,7 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     manager: &M,
     recent_items: &[TrayTunnelItem],
 ) -> tauri::Result<Menu<R>> {
-    let open = MenuItemBuilder::with_id("open", "打开 SSH 隧道管理器").build(manager)?;
+    let open = MenuItemBuilder::with_id("open", "打开主界面").build(manager)?;
     let disconnect_all = MenuItemBuilder::with_id("disconnect_all", "全部断开").build(manager)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(manager)?;
     let submenu = if recent_items.is_empty() {
@@ -1794,5 +1794,22 @@ mod tray_disconnect_all_tests {
             program: "sh".into(),
             args: vec!["-c".into(), "sleep 5".into()],
         }
+    }
+}
+
+#[cfg(test)]
+mod tray_menu_copy_tests {
+    #[test]
+    fn tray_open_menu_label_uses_open_main_window_copy() {
+        let source = include_str!("lib.rs");
+        let production_source = source
+            .split("\n#[cfg(test)]\nmod tray_menu_copy_tests")
+            .next()
+            .expect("production source prefix");
+
+        assert!(
+            production_source.contains(r#"MenuItemBuilder::with_id("open", "打开主界面")"#),
+            "tray open action should use the approved open-main-window copy"
+        );
     }
 }

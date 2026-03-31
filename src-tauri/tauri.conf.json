@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SSH Tunnel Manager",
+  "productName": "ssh-tunnel-manager",
   "version": "0.1.0",
   "identifier": "com.top.sshtunnel",
   "build": {
