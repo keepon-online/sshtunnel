@@ -202,7 +202,8 @@ body {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 24px;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   padding: 24px;
 }
 
@@ -230,7 +231,8 @@ body {
   gap: 16px;
   padding: 16px;
   box-shadow: var(--shell-shadow);
-  min-height: calc(100vh - 48px);
+  height: 100%;
+  min-height: 0;
 }
 
 /* Brand Area */
@@ -468,7 +470,8 @@ code {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
-  min-height: calc(100vh - 48px);
+  height: 100%;
+  min-height: 0;
   box-shadow: var(--shell-shadow);
 }
 
@@ -785,6 +788,7 @@ code {
   background: var(--surface-strong);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .timeline-head {
@@ -822,6 +826,7 @@ code {
   background: var(--surface-muted);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .timeline-lane-head {
