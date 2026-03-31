@@ -745,14 +745,26 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                     TunnelStatus::Idle
                 } else {
                     runtime.last_error = Some(format!("ssh exited with status {status}"));
-                    runtime.reconnect_pending = !runtime.disconnect_requested;
+                    // 认证错误（如密码错误）不应自动重连，否则会不断产生新进程
+                    let has_auth_error = is_auth_error(&runtime.recent_log);
+                    runtime.reconnect_pending =
+                        !runtime.disconnect_requested && !has_auth_error;
                     push_log(runtime, &format!("ssh exited with status {status}"));
+                    if has_auth_error {
+                        push_log(runtime, "auto-reconnect skipped: authentication error detected");
+                    }
                     TunnelStatus::Error
                 }
             }
             Ok(None) => {
                 if let Some(error) = detect_runtime_error(&runtime.recent_log) {
                     runtime.last_error = Some(error.clone());
+                    // 进程仍在运行但检测到致命错误，主动 kill 并阻止重连
+                    let _ = process.kill();
+                    runtime.process = None;
+                    runtime.reconnect_pending =
+                        !runtime.disconnect_requested && !is_auth_error(&runtime.recent_log);
+                    push_log(runtime, "killed ssh process due to detected error");
                     return TunnelStatus::Error;
                 }
 
@@ -777,25 +789,51 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
     }
 }
 
+/// 认证类错误模式，这些错误不应触发自动重连（重连也会以同样方式失败）
+const AUTH_ERROR_PATTERNS: &[&str] = &[
+    "permission denied",
+    "host key verification failed",
+    "too many authentication failures",
+    "no supported authentication methods",
+    "authentication failed",
+];
+
+/// 网络类错误模式，这些错误可以尝试重连
+const NETWORK_ERROR_PATTERNS: &[&str] = &[
+    "connection refused",
+    "connection timed out",
+    "could not resolve hostname",
+    "name or service not known",
+    "no route to host",
+    "network is unreachable",
+    "operation timed out",
+    "connection reset by peer",
+    "broken pipe",
+];
+
 fn detect_runtime_error(logs: &[String]) -> Option<String> {
-    const ERROR_PATTERNS: &[&str] = &[
-        "permission denied",
-        "host key verification failed",
-        "connection refused",
-        "connection timed out",
-        "could not resolve hostname",
-        "name or service not known",
-        "no route to host",
-        "network is unreachable",
-        "operation timed out",
-    ];
+    let all_patterns: Vec<&str> = AUTH_ERROR_PATTERNS
+        .iter()
+        .chain(NETWORK_ERROR_PATTERNS.iter())
+        .copied()
+        .collect();
 
     logs.iter().rev().find_map(|line| {
         let lower = line.to_ascii_lowercase();
-        ERROR_PATTERNS
+        all_patterns
             .iter()
             .any(|pattern| lower.contains(pattern))
             .then(|| line.clone())
+    })
+}
+
+/// 判断日志中是否包含认证类错误
+fn is_auth_error(logs: &[String]) -> bool {
+    logs.iter().rev().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        AUTH_ERROR_PATTERNS
+            .iter()
+            .any(|pattern| lower.contains(pattern))
     })
 }
 
