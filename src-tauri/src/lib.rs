@@ -1238,11 +1238,12 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         *signature = Some(tray_menu_signature(&initial_items));
     }
     let menu = build_tray_menu(app, &initial_items)?;
+    let mut tray = TrayIconBuilder::with_id(MAIN_TRAY_ID).menu(&menu);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
 
-    TrayIconBuilder::with_id(MAIN_TRAY_ID)
-        .menu(&menu)
-        .tooltip("SSH Tunnel Manager")
-        .on_menu_event(|app, event| {
+    tray.tooltip("SSH Tunnel Manager").on_menu_event(|app, event| {
             let event_id = event.id().as_ref().to_string();
             if let Some(id) = event_id.strip_prefix("connect:") {
                 let state = app.state::<AppState>();
@@ -2388,6 +2389,16 @@ mod tray_menu_copy_tests {
         assert!(
             production_source.contains(r#"MenuItemBuilder::with_id("open", "打开主界面")"#),
             "tray open action should use the approved open-main-window copy"
+        );
+    }
+
+    #[test]
+    fn tauri_config_declares_windows_icon_asset() {
+        let config = include_str!("../tauri.conf.json");
+
+        assert!(
+            config.contains(r#""icons/icon.ico""#),
+            "bundle icon config should include icons/icon.ico for Windows tray compatibility"
         );
     }
 }
