@@ -374,6 +374,44 @@ mod tests {
     }
 
     #[test]
+    fn prompted_process_submits_password_to_interactive_session() {
+        let mut process = ManagedProcess::spawn(LaunchPlan::PromptedPassword {
+            command: password_echo_command(),
+            password: "s3cr3t".into(),
+            prompt: "assword:".into(),
+        })
+        .expect("spawn prompted password process");
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut lines = Vec::new();
+
+        while Instant::now() < deadline {
+            lines.extend(process.take_logs());
+            if lines.iter().any(|line| line.contains("RECEIVED:s3cr3t")) {
+                break;
+            }
+
+            if process.try_wait().expect("query child status").is_some() && !lines.is_empty() {
+                break;
+            }
+
+            std::thread::sleep(Duration::from_millis(25));
+        }
+
+        let _ = process.kill();
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("password sent to interactive ssh session")),
+            "expected password send log, got {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("RECEIVED:s3cr3t")),
+            "expected interactive child to receive password, got {lines:?}"
+        );
+    }
+
+    #[test]
     fn windows_process_creation_flags_match_platform_behavior() {
         #[cfg(target_os = "windows")]
         assert_eq!(windows_process_creation_flags(), 0x0800_0000);
@@ -400,6 +438,29 @@ mod tests {
             args: vec![
                 "-c".into(),
                 "printf 'stderr-first\\nstderr-second\\n' >&2".into(),
+            ],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn password_echo_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec![
+                "/V:ON".into(),
+                "/C".into(),
+                "set /p pass=Password: & echo RECEIVED:!pass!".into(),
+            ],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn password_echo_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "printf 'Password:'; read pass; printf 'RECEIVED:%s\\n' \"$pass\"".into(),
             ],
         }
     }
