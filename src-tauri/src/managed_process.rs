@@ -156,47 +156,73 @@ impl ManagedProcess {
             .map_err(|error| error.to_string())?;
 
         let logs = Arc::new(Mutex::new(Vec::new()));
-        let password = password.to_string();
+        let password_for_writer = password.to_string();
         let prompt = prompt.to_ascii_lowercase();
         let log_sink = Arc::clone(&logs);
+        let log_sink_writer = Arc::clone(&logs);
 
+        // 使用 channel 通知 writer 线程：reader 检测到了密码提示符
+        let (prompt_tx, prompt_rx) = std::sync::mpsc::channel::<()>();
+
+        // Reader 线程：读取 PTY 输出，检测密码提示符
         let reader_thread = thread::spawn(move || {
             let mut buf = [0_u8; 1024];
             let mut transcript = String::new();
-            let mut sent_password = false;
+            let mut notified = false;
 
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        if !transcript.trim().is_empty() {
-                            push_log(&log_sink, transcript.trim());
-                        }
                         break;
                     }
                     Ok(read) => {
                         let chunk = String::from_utf8_lossy(&buf[..read]).to_string();
                         transcript.push_str(&chunk);
                         for line in chunk.lines() {
-                            if !line.trim().is_empty() {
-                                push_log(&log_sink, line.trim());
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                push_log(&log_sink, trimmed);
                             }
                         }
 
-                        if !sent_password
-                            && transcript.to_ascii_lowercase().contains(&prompt)
-                            && writer.write_all(password.as_bytes()).is_ok()
-                            && writer.write_all(b"\r").is_ok()
-                        {
-                            let _ = writer.flush();
-                            sent_password = true;
-                            push_log(&log_sink, "password sent to interactive ssh session");
+                        // 去掉 ANSI/VT100 控制序列后匹配提示符
+                        // Windows ConPTY 常在输出中夹带控制字符
+                        if !notified {
+                            let clean = strip_ansi_sequences(&transcript);
+                            if clean.to_ascii_lowercase().contains(&prompt) {
+                                let _ = prompt_tx.send(());
+                                notified = true;
+                            }
                         }
                     }
-                    Err(error) => {
-                        push_log(&log_sink, &format!("pty reader error: {error}"));
+                    Err(_) => {
                         break;
                     }
                 }
+            }
+        });
+
+        // Writer 线程：等待提示符通知或超时后盲发密码
+        thread::spawn(move || {
+            // 最多等 5 秒，等待 reader 线程通知检测到了密码提示符
+            let received = prompt_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_ok();
+
+            if received {
+                push_log(&log_sink_writer, "password prompt detected, sending password");
+            } else {
+                push_log(
+                    &log_sink_writer,
+                    "password prompt not detected within 5s, sending password (blind fallback)",
+                );
+            }
+
+            if writer.write_all(password_for_writer.as_bytes()).is_ok()
+                && writer.write_all(b"\r").is_ok()
+            {
+                let _ = writer.flush();
+                push_log(&log_sink_writer, "password sent to interactive ssh session");
             }
         });
 
@@ -263,6 +289,37 @@ fn join_reader(reader_thread: &mut Option<JoinHandle<()>>) {
     if let Some(handle) = reader_thread.take() {
         let _ = handle.join();
     }
+}
+
+/// 去除 ANSI/VT100 转义序列（ESC [ ... 终止符）
+/// Windows ConPTY 输出常夹带光标控制、颜色等控制字符，
+/// 导致原始文本匹配密码提示符失败
+fn strip_ansi_sequences(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            // CSI 序列: ESC [ ... (终止于 0x40..0x7E)
+            if chars.peek() == Some(&'[') {
+                chars.next(); // 消费 '['
+                // 跳过直到遇到终止字符 (字母或 '@'..='~')
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next.is_ascii_alphabetic() || ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            // 也跳过其他 ESC 序列（OSC 等）
+        } else if ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t' {
+            // 跳过其他不可见控制字符
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
 }
 
 fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: &str) {
