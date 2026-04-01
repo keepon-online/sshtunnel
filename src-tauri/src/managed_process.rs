@@ -35,6 +35,7 @@ struct NativeProcess {
 struct PromptedProcess {
     child: Box<dyn portable_pty::Child + Send>,
     reader_thread: Option<JoinHandle<()>>,
+    _pty_master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
 impl ManagedProcess {
@@ -158,12 +159,11 @@ impl ManagedProcess {
             .map_err(|error| error.to_string())?;
         trace_debug("managed_process", "spawn_prompted child spawned");
 
-        let mut reader = pair
-            .master
+        let master = pair.master;
+        let mut reader = master
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
-        let mut writer = pair
-            .master
+        let mut writer = master
             .take_writer()
             .map_err(|error| error.to_string())?;
 
@@ -246,6 +246,7 @@ impl ManagedProcess {
             inner: ManagedProcessInner::Prompted(PromptedProcess {
                 child,
                 reader_thread: Some(reader_thread),
+                _pty_master: master,
             }),
             logs,
             needs_connection_signal: true,
@@ -361,7 +362,8 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus as PtyExitStatus};
+    use anyhow::Error;
+    use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus as PtyExitStatus, MasterPty, PtySize};
     use sshtunnel_core::ssh_launch::{CommandSpec, LaunchPlan};
 
     use super::{
@@ -484,6 +486,7 @@ mod tests {
                 reader_thread: Some(std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(2));
                 })),
+                _pty_master: Box::new(DropTrackingMasterPty::default()),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
             needs_connection_signal: true,
@@ -514,6 +517,7 @@ mod tests {
                 reader_thread: Some(std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(2));
                 })),
+                _pty_master: Box::new(DropTrackingMasterPty::default()),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
             needs_connection_signal: true,
@@ -529,6 +533,28 @@ mod tests {
         );
         assert_eq!(kill_calls.load(Ordering::SeqCst), 1);
         assert_eq!(wait_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn prompted_process_retains_pty_master_until_process_drop() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let process = ManagedProcess {
+            inner: ManagedProcessInner::Prompted(PromptedProcess {
+                child: Box::new(ExitedPromptedChild {
+                    wait_calls: Arc::new(AtomicUsize::new(0)),
+                }),
+                reader_thread: None,
+                _pty_master: Box::new(DropTrackingMasterPty {
+                    drops: Arc::clone(&drops),
+                }),
+            }),
+            logs: Arc::new(Mutex::new(Vec::new())),
+            needs_connection_signal: true,
+        };
+
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(process);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -676,6 +702,45 @@ mod tests {
 
         #[cfg(target_os = "windows")]
         fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct DropTrackingMasterPty {
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Drop for DropTrackingMasterPty {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl MasterPty for DropTrackingMasterPty {
+        fn resize(&self, _size: PtySize) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn get_size(&self) -> Result<PtySize, Error> {
+            Ok(PtySize::default())
+        }
+
+        fn try_clone_reader(&self) -> Result<Box<dyn std::io::Read + Send>, Error> {
+            Ok(Box::new(std::io::Cursor::new(Vec::<u8>::new())))
+        }
+
+        fn take_writer(&self) -> Result<Box<dyn std::io::Write + Send>, Error> {
+            Ok(Box::new(std::io::Cursor::new(Vec::<u8>::new())))
+        }
+
+        #[cfg(unix)]
+        fn process_group_leader(&self) -> Option<libc::pid_t> {
+            None
+        }
+
+        #[cfg(unix)]
+        fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
             None
         }
     }
