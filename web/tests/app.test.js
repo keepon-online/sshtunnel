@@ -10,10 +10,12 @@ const {
   DESKTOP_ONLY_MESSAGE,
   createTunnelListNode,
   renderTunnelList,
+  renderLogSection,
   createDesktopBridge,
   fillPrivateKeyPath,
   mergeTimelineLogs,
   shouldRefreshSnapshot,
+  scrollLogPanelToLatest,
   setEditorError,
   installDebugReporter,
   validateTunnelPayload,
@@ -70,6 +72,30 @@ function fakeList() {
     set innerHTML(value) {
       this.resetCount += 1;
       this.children = [];
+      this._innerHTML = value;
+    },
+    get innerHTML() {
+      return this._innerHTML || "";
+    },
+  };
+}
+
+function fakeScrollableList() {
+  return {
+    children: [],
+    resetCount: 0,
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 120,
+    appendChild(child) {
+      this.children.push(child);
+      this.scrollHeight = this.children.length * 48;
+      return child;
+    },
+    set innerHTML(value) {
+      this.resetCount += 1;
+      this.children = [];
+      this.scrollHeight = 0;
       this._innerHTML = value;
     },
     get innerHTML() {
@@ -212,6 +238,39 @@ test("renderTunnelList skips DOM rebuild when tunnel list signature is unchanged
   assert.equal(secondSignature, firstSignature);
   assert.equal(list.resetCount, 1);
   assert.equal(list.children.length, 1);
+});
+
+test("scrollLogPanelToLatest keeps the newest log line in view", () => {
+  const container = {
+    scrollTop: 0,
+    scrollHeight: 420,
+    clientHeight: 120,
+  };
+
+  scrollLogPanelToLatest(container);
+
+  assert.equal(container.scrollTop, 300);
+});
+
+test("renderLogSection appends log entries and follows the tail", () => {
+  const container = fakeScrollableList();
+
+  renderLogSection(
+    container,
+    [
+      { text: "spawned ssh process pid=123", tone: "default" },
+      { text: "password sent to interactive ssh session", tone: "default" },
+      { text: "channel 0: open failed: Connection refused", tone: "error" },
+      { text: "ssh exited with status code 255", tone: "error" },
+    ],
+    "暂无 SSH 输出",
+    fakeDocument(),
+  );
+
+  assert.equal(container.children.length, 4);
+  assert.equal(container.children[3].className, "log-line error");
+  assert.equal(container.children[3].textContent, "ssh exited with status code 255");
+  assert.equal(container.scrollTop, 72);
 });
 
 test("shouldRefreshSnapshot pauses auto refresh while the editor drawer is open", () => {
@@ -456,4 +515,12 @@ test("styles keep select controls readable in dark theme", () => {
   assert.match(css, /input:disabled,\s*[\r\n\s]*select:disabled\s*\{[\s\S]*background:\s*var\(--surface-layer\)/);
   assert.match(css, /label span\s*\{[\s\S]*color:\s*var\(--ink\)/);
   assert.match(css, /input::placeholder,\s*[\r\n\s]*select::placeholder\s*\{[\s\S]*color:\s*var\(--muted\)/);
+});
+
+test("styles keep log panels scrollable and tall enough for recent output", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../styles.css"), "utf8");
+
+  assert.match(css, /\.log-panel\s*\{[\s\S]*overflow-y:\s*auto;/);
+  assert.match(css, /\.log-panel\s*\{[\s\S]*overflow-x:\s*hidden;/);
+  assert.match(css, /\.log-panel\s*\{[\s\S]*min-height:\s*180px;/);
 });

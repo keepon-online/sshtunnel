@@ -841,10 +841,13 @@ code {
 .log-panel {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   align-content: start;
   gap: 10px;
   padding-right: 8px;
+  padding-bottom: 4px;
+  min-height: 180px;
 }
 
 .log-line {

@@ -164,6 +164,48 @@
     return [...(Array.isArray(tunnelLogs) ? tunnelLogs : []), ...(Array.isArray(testLogs) ? testLogs : [])];
   }
 
+  function scrollLogPanelToLatest(container) {
+    if (!container || typeof container.scrollHeight !== "number") {
+      return;
+    }
+
+    const viewportHeight =
+      typeof container.clientHeight === "number" && Number.isFinite(container.clientHeight)
+        ? container.clientHeight
+        : 0;
+    container.scrollTop = Math.max(container.scrollHeight - viewportHeight, 0);
+  }
+
+  function renderLogSection(container, entries, emptyText, documentRef) {
+    if (!container) {
+      return;
+    }
+
+    const doc = documentRef ?? container.ownerDocument;
+    if (!doc?.createElement) {
+      return;
+    }
+
+    container.innerHTML = "";
+    if (!entries.length) {
+      const empty = doc.createElement("div");
+      empty.className = "log-line";
+      empty.textContent = emptyText;
+      container.appendChild(empty);
+      scrollLogPanelToLatest(container);
+      return;
+    }
+
+    for (const entry of entries) {
+      const div = doc.createElement("div");
+      div.className = `log-line${entry.tone === "error" ? " error" : ""}`;
+      div.textContent = entry.text;
+      container.appendChild(div);
+    }
+
+    scrollLogPanelToLatest(container);
+  }
+
   function describeConnectivityResult(result) {
     if (!result) {
       return null;
@@ -414,24 +456,6 @@
       return state.snapshot?.tunnels.find((item) => item.definition.id === state.editingId) ?? null;
     }
 
-    function renderLogSection(container, entries, emptyText) {
-      container.innerHTML = "";
-      if (!entries.length) {
-        const empty = document.createElement("div");
-        empty.className = "log-line";
-        empty.textContent = emptyText;
-        container.appendChild(empty);
-        return;
-      }
-
-      for (const entry of entries) {
-        const div = document.createElement("div");
-        div.className = `log-line${entry.tone === "error" ? " error" : ""}`;
-        div.textContent = entry.text;
-        container.appendChild(div);
-      }
-    }
-
     function renderWorkspace(tunnel) {
       const hero = describeCommandCenterHero(tunnel);
       const cards = describeCommandCenterCards(tunnel);
@@ -463,8 +487,8 @@
       refs.authMeta.classList.toggle("hidden", !view.authMeta);
       refs.logSummary.textContent = view.logSummary;
 
-      renderLogSection(refs.statusEventsLog, view.statusEvents, view.emptyStatusText);
-      renderLogSection(refs.sshOutputLog, view.sshOutput, view.emptySshText);
+      renderLogSection(refs.statusEventsLog, view.statusEvents, view.emptyStatusText, document);
+      renderLogSection(refs.sshOutputLog, view.sshOutput, view.emptySshText, document);
     }
 
     function renderConnectivityResult() {
@@ -901,7 +925,9 @@
     fillPrivateKeyPath,
     installDebugReporter,
     normalizeDialogSelection,
+    renderLogSection,
     shouldRefreshSnapshot,
+    scrollLogPanelToLatest,
     mergeTimelineLogs,
     setEditorError,
     validateTunnelPayload,
