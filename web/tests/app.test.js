@@ -15,6 +15,7 @@ const {
   fillPrivateKeyPath,
   mergeTimelineLogs,
   shouldRefreshSnapshot,
+  shouldAutoFollowLogPanel,
   scrollLogPanelToLatest,
   setEditorError,
   validateTunnelPayload,
@@ -226,8 +227,32 @@ test("scrollLogPanelToLatest keeps the newest log line in view", () => {
   assert.equal(container.scrollTop, 300);
 });
 
+test("shouldAutoFollowLogPanel stays attached when the reader is near the tail", () => {
+  assert.equal(
+    shouldAutoFollowLogPanel({
+      scrollTop: 458,
+      scrollHeight: 600,
+      clientHeight: 120,
+    }),
+    true,
+  );
+});
+
+test("shouldAutoFollowLogPanel preserves manual scroll position away from the tail", () => {
+  assert.equal(
+    shouldAutoFollowLogPanel({
+      scrollTop: 120,
+      scrollHeight: 600,
+      clientHeight: 120,
+    }),
+    false,
+  );
+});
+
 test("renderLogSection appends log entries and follows the tail", () => {
   const container = fakeScrollableList();
+  container.scrollTop = 300;
+  container.scrollHeight = 420;
 
   renderLogSection(
     container,
@@ -245,6 +270,27 @@ test("renderLogSection appends log entries and follows the tail", () => {
   assert.equal(container.children[3].className, "log-line error");
   assert.equal(container.children[3].textContent, "ssh exited with status code 255");
   assert.equal(container.scrollTop, 72);
+});
+
+test("renderLogSection does not steal scroll position when reading history", () => {
+  const container = fakeScrollableList();
+  container.scrollTop = 96;
+  container.scrollHeight = 720;
+
+  renderLogSection(
+    container,
+    [
+      { text: "line 1", tone: "default" },
+      { text: "line 2", tone: "default" },
+      { text: "line 3", tone: "default" },
+      { text: "line 4", tone: "default" },
+      { text: "line 5", tone: "default" },
+    ],
+    "暂无 SSH 输出",
+    fakeDocument(),
+  );
+
+  assert.equal(container.scrollTop, 96);
 });
 
 test("shouldRefreshSnapshot pauses auto refresh while the editor drawer is open", () => {
@@ -496,5 +542,26 @@ test("styles keep log panels scrollable and tall enough for recent output", () =
 
   assert.match(css, /\.log-panel\s*\{[\s\S]*overflow-y:\s*auto;/);
   assert.match(css, /\.log-panel\s*\{[\s\S]*overflow-x:\s*hidden;/);
-  assert.match(css, /\.log-panel\s*\{[\s\S]*min-height:\s*180px;/);
+  assert.match(css, /\.log-panel\s*\{[\s\S]*max-height:\s*clamp\(240px,\s*34vh,\s*420px\);/);
+  assert.match(css, /\.log-panel\s*\{[\s\S]*min-height:\s*220px;/);
+});
+
+test("styles allow the main shell to scroll vertically on shorter Windows viewports", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../styles.css"), "utf8");
+  const shellBlock = css.match(/\.shell\s*\{[^}]*\}/)?.[0] ?? "";
+
+  assert.match(shellBlock, /min-height:\s*100vh;/);
+  assert.match(shellBlock, /overflow-x:\s*hidden;/);
+  assert.equal(shellBlock.includes("\n  height: 100vh;"), false);
+  assert.equal(shellBlock.includes("\n  overflow: hidden;"), false);
+});
+
+test("tauri config centers the main window and uses lighter height constraints", () => {
+  const config = fs.readFileSync(path.join(__dirname, "../../src-tauri/tauri.conf.json"), "utf8");
+
+  assert.match(config, /"center":\s*true/);
+  assert.match(config, /"width":\s*1280/);
+  assert.match(config, /"height":\s*760/);
+  assert.match(config, /"minWidth":\s*940/);
+  assert.match(config, /"minHeight":\s*620/);
 });

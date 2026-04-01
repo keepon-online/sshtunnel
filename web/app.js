@@ -137,6 +137,20 @@
     return [...(Array.isArray(tunnelLogs) ? tunnelLogs : []), ...(Array.isArray(testLogs) ? testLogs : [])];
   }
 
+  function shouldAutoFollowLogPanel(container, threshold = 24) {
+    if (
+      !container ||
+      typeof container.scrollTop !== "number" ||
+      typeof container.scrollHeight !== "number" ||
+      typeof container.clientHeight !== "number"
+    ) {
+      return true;
+    }
+
+    const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+    return maxScrollTop <= threshold || container.scrollTop >= maxScrollTop - threshold;
+  }
+
   function scrollLogPanelToLatest(container) {
     if (!container || typeof container.scrollHeight !== "number") {
       return;
@@ -154,6 +168,7 @@
       return;
     }
 
+    const shouldFollow = shouldAutoFollowLogPanel(container);
     const doc = documentRef ?? container.ownerDocument;
     if (!doc?.createElement) {
       return;
@@ -165,7 +180,9 @@
       empty.className = "log-line";
       empty.textContent = emptyText;
       container.appendChild(empty);
-      scrollLogPanelToLatest(container);
+      if (shouldFollow) {
+        scrollLogPanelToLatest(container);
+      }
       return;
     }
 
@@ -176,7 +193,9 @@
       container.appendChild(div);
     }
 
-    scrollLogPanelToLatest(container);
+    if (shouldFollow) {
+      scrollLogPanelToLatest(container);
+    }
   }
 
   function describeConnectivityResult(result) {
@@ -872,6 +891,7 @@
     normalizeDialogSelection,
     renderLogSection,
     shouldRefreshSnapshot,
+    shouldAutoFollowLogPanel,
     scrollLogPanelToLatest,
     mergeTimelineLogs,
     setEditorError,

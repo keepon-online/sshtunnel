@@ -117,9 +117,12 @@ test("describeTunnelActions enables reconnect for error state", () => {
 
 test("describeTunnelListItem returns localized copy and active state for selected tunnel", () => {
   assert.deepEqual(describeTunnelListItem(sampleTunnel("connected"), "db"), {
+    id: "db",
     title: "Database",
-    subtitle: "deploy@bastion.example.com",
-    forwardText: "15432 -> 10.0.0.12:5432",
+    subtitle: "deploy@bastion.***.com",
+    subtitleRaw: "deploy@bastion.example.com",
+    forwardText: "15432 -> 10.***.***.12:5432",
+    forwardRaw: "15432 -> 10.0.0.12:5432",
     badgeTone: "connected",
     badgeText: "已连接",
     isActive: true,
@@ -142,7 +145,8 @@ test("describeWorkspacePanel returns empty-state copy when no tunnel is selected
 test("describeWorkspacePanel returns title and subtitle for selected tunnel", () => {
   assert.deepEqual(describeWorkspacePanel(sampleTunnel("error")), {
     title: "Database",
-    subtitle: "deploy@bastion.example.com",
+    subtitle: "deploy@bastion.***.com",
+    subtitleRaw: "deploy@bastion.example.com",
     statusText: "错误",
     statusTone: "error",
   });
@@ -183,10 +187,12 @@ test("describeStatusSummaryCards returns connected summary", () => {
     primaryLabel: "连接状态",
     primaryTone: "connected",
     primaryText: "已连接",
-    primarySubtitle: "deploy@bastion.example.com",
+    primarySubtitle: "deploy@bastion.***.com",
+    primarySubtitleRaw: "deploy@bastion.example.com",
     errorText: "",
     forwardLabel: "本地转发",
-    forwardText: "127.0.0.1:15432 -> 10.0.0.12:5432",
+    forwardText: "127.0.0.1:15432 -> 10.***.***.12:5432",
+    forwardRaw: "127.0.0.1:15432 -> 10.0.0.12:5432",
     authLabel: "认证方式",
     authText: "密钥认证",
     authMeta: "自动重连: 开启",
@@ -202,10 +208,12 @@ test("describeStatusSummaryCards surfaces error summary and auth details", () =>
     primaryLabel: "连接状态",
     primaryTone: "error",
     primaryText: "错误",
-    primarySubtitle: "deploy@bastion.example.com",
+    primarySubtitle: "deploy@bastion.***.com",
+    primarySubtitleRaw: "deploy@bastion.example.com",
     errorText: "ssh exited with status code 7",
     forwardLabel: "本地转发",
-    forwardText: "127.0.0.1:15432 -> 10.0.0.12:5432",
+    forwardText: "127.0.0.1:15432 -> 10.***.***.12:5432",
+    forwardRaw: "127.0.0.1:15432 -> 10.0.0.12:5432",
     authLabel: "认证方式",
     authText: "密码认证",
     authMeta: "自动重连: 关闭",
@@ -268,7 +276,8 @@ test("describeCommandCenterHero returns status-aware copy for selected tunnels",
     assert.equal(hero.statusText, expected.text);
     assert.equal(hero.statusTone, expected.tone);
     assert.equal(hero.title, "Database");
-    assert.equal(hero.subtitle, "deploy@bastion.example.com");
+    assert.equal(hero.subtitle, "deploy@bastion.***.com");
+    assert.equal(hero.subtitleRaw, "deploy@bastion.example.com");
   }
 });
 

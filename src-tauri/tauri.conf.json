@@ -12,10 +12,11 @@
       {
         "label": "main",
         "title": "SSH Tunnel Manager",
-        "width": 1220,
-        "height": 820,
-        "minWidth": 980,
-        "minHeight": 700
+        "center": true,
+        "width": 1280,
+        "height": 760,
+        "minWidth": 940,
+        "minHeight": 620
       }
     ],
     "security": {

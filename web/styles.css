@@ -161,6 +161,7 @@ body {
   background-attachment: fixed;
   -webkit-font-smoothing: var(--font-smoothing);
   -moz-osx-font-smoothing: var(--moz-font-smoothing);
+  overflow-x: hidden;
 }
 
 /* Scrollbars */
@@ -202,9 +203,10 @@ body {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 24px;
-  height: 100vh;
-  overflow: hidden;
-  padding: 24px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  padding: 24px 24px max(24px, env(safe-area-inset-bottom));
+  align-items: start;
 }
 
 /* Glassmorphism Base for Containers */
@@ -231,8 +233,8 @@ body {
   gap: 16px;
   padding: 16px;
   box-shadow: var(--shell-shadow);
-  height: 100%;
   min-height: 0;
+  align-self: start;
 }
 
 /* Brand Area */
@@ -463,16 +465,17 @@ code {
 /* Central Workspace */
 .command-center {
   min-width: 0;
+  min-height: 0;
 }
 
 .workspace-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 16px;
   padding: 16px;
-  height: 100%;
   min-height: 0;
   box-shadow: var(--shell-shadow);
+  align-self: start;
 }
 
 .hero-card {
@@ -817,8 +820,8 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  flex: 1;
-  min-height: 0; 
+  min-height: 0;
+  align-items: start;
 }
 
 .timeline-lane {
@@ -839,7 +842,7 @@ code {
 }
 
 .log-panel {
-  flex: 1;
+  flex: 0 0 auto;
   overflow-y: auto;
   overflow-x: hidden;
   display: grid;
@@ -847,7 +850,8 @@ code {
   gap: 10px;
   padding-right: 8px;
   padding-bottom: 4px;
-  min-height: 180px;
+  min-height: 220px;
+  max-height: clamp(240px, 34vh, 420px);
 }
 
 .log-line {
@@ -1207,6 +1211,9 @@ select::placeholder {
     width: 100vw;
     border-radius: 0;
     padding: 20px;
+  }
+  .log-panel {
+    max-height: clamp(220px, 38vh, 360px);
   }
 }
 
