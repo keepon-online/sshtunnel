@@ -324,6 +324,12 @@ fn reveal_config_path(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.config_path.display().to_string())
 }
 
+#[tauri::command]
+fn append_debug_trace(scope: String, message: String) -> Result<(), String> {
+    trace_debug(&scope, &message);
+    Ok(())
+}
+
 fn resolve_config_path() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("sshtunnel-manager").join("config.json")
@@ -1419,7 +1425,8 @@ pub fn run() {
             connect_tunnel,
             disconnect_tunnel,
             set_autostart,
-            reveal_config_path
+            reveal_config_path,
+            append_debug_trace
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

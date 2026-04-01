@@ -15,6 +15,7 @@ const {
   mergeTimelineLogs,
   shouldRefreshSnapshot,
   setEditorError,
+  installDebugReporter,
   validateTunnelPayload,
 } = require("../app.js");
 const { describeDiagnosticLogPanel } = require("../view-model.js");
@@ -98,6 +99,31 @@ test("createDesktopBridge uses tauri dialog open and returns the selected key pa
   });
 
   assert.equal(await bridge.pickPrivateKeyPath(), "/home/top/.ssh/id_ed25519");
+});
+
+test("installDebugReporter registers global listeners and forwards trace events", async () => {
+  const listeners = {};
+  const host = {
+    addEventListener(name, handler) {
+      listeners[name] = handler;
+    },
+  };
+  const calls = [];
+  const trace = installDebugReporter(host, async (command, args) => {
+    calls.push({ command, args });
+  });
+
+  await trace("connect_click", "clicked");
+  await listeners.error({ message: "boom" });
+  await listeners.unhandledrejection({ reason: new Error("reject") });
+
+  assert.deepEqual(
+    calls.map((call) => call.command),
+    ["append_debug_trace", "append_debug_trace", "append_debug_trace"],
+  );
+  assert.equal(calls[0].args.scope, "frontend:connect_click");
+  assert.match(calls[1].args.message, /boom/);
+  assert.match(calls[2].args.message, /reject/);
 });
 
 test("setEditorError renders drawer errors inline", () => {

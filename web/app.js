@@ -86,6 +86,33 @@
     return visibilityState === "visible" && !state?.editorOpen;
   }
 
+  function installDebugReporter(host, invoke) {
+    let sequence = 0;
+
+    const trace = async (scope, message) => {
+      sequence += 1;
+      const payload = `[${sequence}] ${message}`;
+      try {
+        await invoke("append_debug_trace", { scope: `frontend:${scope}`, message: payload });
+      } catch (_) {
+        // Ignore trace transport failures to avoid affecting UI behavior.
+      }
+    };
+
+    host.addEventListener("error", (event) => {
+      const detail = event?.error?.stack || event?.message || "unknown error";
+      void trace("window_error", String(detail));
+    });
+
+    host.addEventListener("unhandledrejection", (event) => {
+      const reason = event?.reason;
+      const detail = reason?.stack || reason?.message || String(reason);
+      void trace("unhandled_rejection", detail);
+    });
+
+    return trace;
+  }
+
   function hasText(value) {
     return typeof value === "string" && value.trim().length > 0;
   }
@@ -292,6 +319,7 @@
     
     const bridge = createDesktopBridge(host);
     const invoke = (command, args = {}) => bridge.invoke(command, args);
+    const traceFrontend = installDebugReporter(host, invoke);
     const {
       describeTunnelActions,
       describeTunnelListItem,
@@ -609,9 +637,12 @@
 
     async function refresh() {
       try {
+        void traceFrontend("refresh", "begin");
         state.snapshot = await invoke("load_state");
+        void traceFrontend("refresh", "load_state resolved");
         render();
       } catch (error) {
+        void traceFrontend("refresh", `error: ${toErrorMessage(error)}`);
         refs.statusCard.className = "status-card error";
         refs.statusCard.textContent = toErrorMessage(error);
       }
@@ -707,26 +738,60 @@
     });
 
     refs.autostartToggle.addEventListener("click", async () => {
-      state.snapshot = await invoke("set_autostart", {
-        enabled: !Boolean(state.snapshot?.autostart_enabled),
-      });
-      render();
+      try {
+        void traceFrontend("autostart_click", "begin");
+        state.snapshot = await invoke("set_autostart", {
+          enabled: !Boolean(state.snapshot?.autostart_enabled),
+        });
+        void traceFrontend("autostart_click", "invoke resolved");
+        render();
+      } catch (error) {
+        void traceFrontend("autostart_click", `error: ${toErrorMessage(error)}`);
+        refs.statusCard.className = "status-card error";
+        refs.statusCard.textContent = toErrorMessage(error);
+      }
     });
 
     refs.connectBtn.addEventListener("click", async () => {
+      void traceFrontend(
+        "connect_click",
+        `clicked selectedId=${state.selectedId ?? "null"} disabled=${String(refs.connectBtn.disabled)}`,
+      );
       if (!state.selectedId) {
+        void traceFrontend("connect_click", "aborted because selectedId is null");
         return;
       }
-      state.snapshot = await invoke("connect_tunnel", { id: state.selectedId });
-      render();
+      try {
+        void traceFrontend("connect_click", `invoking connect_tunnel id=${state.selectedId}`);
+        state.snapshot = await invoke("connect_tunnel", { id: state.selectedId });
+        void traceFrontend("connect_click", `invoke resolved id=${state.selectedId}`);
+        render();
+      } catch (error) {
+        void traceFrontend("connect_click", `error: ${toErrorMessage(error)}`);
+        refs.statusCard.className = "status-card error";
+        refs.statusCard.textContent = toErrorMessage(error);
+      }
     });
 
     refs.disconnectBtn.addEventListener("click", async () => {
+      void traceFrontend(
+        "disconnect_click",
+        `clicked selectedId=${state.selectedId ?? "null"} disabled=${String(refs.disconnectBtn.disabled)}`,
+      );
       if (!state.selectedId) {
+        void traceFrontend("disconnect_click", "aborted because selectedId is null");
         return;
       }
-      state.snapshot = await invoke("disconnect_tunnel", { id: state.selectedId });
-      render();
+      try {
+        void traceFrontend("disconnect_click", `invoking disconnect_tunnel id=${state.selectedId}`);
+        state.snapshot = await invoke("disconnect_tunnel", { id: state.selectedId });
+        void traceFrontend("disconnect_click", `invoke resolved id=${state.selectedId}`);
+        render();
+      } catch (error) {
+        void traceFrontend("disconnect_click", `error: ${toErrorMessage(error)}`);
+        refs.statusCard.className = "status-card error";
+        refs.statusCard.textContent = toErrorMessage(error);
+      }
     });
 
     refs.editBtn.addEventListener("click", () => {
@@ -739,11 +804,20 @@
 
     refs.deleteBtn.addEventListener("click", async () => {
       if (!state.selectedId) {
+        void traceFrontend("delete_click", "aborted because selectedId is null");
         return;
       }
-      state.snapshot = await invoke("delete_tunnel", { id: state.selectedId });
-      state.selectedId = state.snapshot.tunnels[0]?.definition.id ?? null;
-      render();
+      try {
+        void traceFrontend("delete_click", `invoking delete_tunnel id=${state.selectedId}`);
+        state.snapshot = await invoke("delete_tunnel", { id: state.selectedId });
+        void traceFrontend("delete_click", `invoke resolved id=${state.selectedId}`);
+        state.selectedId = state.snapshot.tunnels[0]?.definition.id ?? null;
+        render();
+      } catch (error) {
+        void traceFrontend("delete_click", `error: ${toErrorMessage(error)}`);
+        refs.statusCard.className = "status-card error";
+        refs.statusCard.textContent = toErrorMessage(error);
+      }
     });
 
     refs.pickPrivateKey.addEventListener("click", async () => {
@@ -825,6 +899,7 @@
     clearEditorError,
     createDesktopBridge,
     fillPrivateKeyPath,
+    installDebugReporter,
     normalizeDialogSelection,
     shouldRefreshSnapshot,
     mergeTimelineLogs,
