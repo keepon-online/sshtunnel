@@ -274,6 +274,17 @@
     return describeDiagnosticLogPanel(lines);
   }
 
+  function formatDuration(epochSeconds) {
+    if (!epochSeconds || typeof epochSeconds !== "number") return "";
+    const now = Math.floor(Date.now() / 1000);
+    let diff = Math.max(now - epochSeconds, 0);
+    const hours = Math.floor(diff / 3600);
+    diff %= 3600;
+    const minutes = Math.floor(diff / 60);
+    const seconds = diff % 60;
+    return [hours, minutes, seconds].map((v) => String(v).padStart(2, "0")).join(":");
+  }
+
   function summarizeSnapshotMeta(snapshot) {
     const autostart = describeAutostart(Boolean(snapshot?.autostart_enabled));
 
@@ -294,6 +305,7 @@
     describeDiagnosticLogPanel,
     describeStatusSummaryCards,
     describeWorkspacePanel,
+    formatDuration,
     summarizeSnapshotMeta,
     describeCommandCenterHero,
     describeCommandCenterCards,

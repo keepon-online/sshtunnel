@@ -9,6 +9,7 @@ const {
   mapStatusSummaryToCommandCenterCards,
   DESKTOP_ONLY_MESSAGE,
   createTunnelListNode,
+  filterTunnels,
   renderTunnelList,
   renderLogSection,
   createDesktopBridge,
@@ -195,6 +196,8 @@ test("renderTunnelList skips DOM rebuild when tunnel list signature is unchanged
     describeTunnelListItem,
     () => {},
     null,
+    "",
+    "all",
   );
 
   assert.equal(list.resetCount, 1);
@@ -208,6 +211,8 @@ test("renderTunnelList skips DOM rebuild when tunnel list signature is unchanged
     describeTunnelListItem,
     () => {},
     firstSignature,
+    "",
+    "all",
   );
 
   assert.equal(secondSignature, firstSignature);
@@ -564,4 +569,61 @@ test("tauri config centers the main window and uses lighter height constraints",
   assert.match(config, /"height":\s*760/);
   assert.match(config, /"minWidth":\s*940/);
   assert.match(config, /"minHeight":\s*620/);
+});
+
+test("filterTunnels returns all tunnels when no filters are active", () => {
+  const tunnels = [
+    { definition: { id: "a", name: "prod-db" }, status: "connected" },
+    { definition: { id: "b", name: "dev-redis" }, status: "idle" },
+  ];
+
+  assert.deepEqual(filterTunnels(tunnels, "", "all"), tunnels);
+});
+
+test("filterTunnels filters by status", () => {
+  const tunnels = [
+    { definition: { id: "a", name: "prod-db" }, status: "connected" },
+    { definition: { id: "b", name: "dev-redis" }, status: "idle" },
+    { definition: { id: "c", name: "staging" }, status: "error" },
+  ];
+
+  assert.deepEqual(filterTunnels(tunnels, "", "connected"), [tunnels[0]]);
+  assert.deepEqual(filterTunnels(tunnels, "", "idle"), [tunnels[1]]);
+  assert.deepEqual(filterTunnels(tunnels, "", "error"), [tunnels[2]]);
+});
+
+test("filterTunnels filters by text matching name, host, username, and ports", () => {
+  const tunnels = [
+    { definition: { id: "a", name: "prod-db", ssh_host: "bastion.example.com", username: "admin", ssh_port: 22, local_bind_port: 15432, remote_host: "10.0.0.12", remote_port: 5432 }, status: "idle" },
+    { definition: { id: "b", name: "dev-redis", ssh_host: "dev.local", username: "deploy", ssh_port: 22, local_bind_port: 6379, remote_host: "redis.internal", remote_port: 6379 }, status: "idle" },
+  ];
+
+  assert.deepEqual(filterTunnels(tunnels, "prod", "all"), [tunnels[0]]);
+  assert.deepEqual(filterTunnels(tunnels, "redis", "all"), [tunnels[1]]);
+  assert.deepEqual(filterTunnels(tunnels, "5432", "all"), [tunnels[0]]);
+  assert.deepEqual(filterTunnels(tunnels, "admin", "all"), [tunnels[0]]);
+  assert.deepEqual(filterTunnels(tunnels, "deploy", "all"), [tunnels[1]]);
+});
+
+test("filterTunnels combines text and status filters", () => {
+  const tunnels = [
+    { definition: { id: "a", name: "prod-db", ssh_host: "bastion", username: "admin", ssh_port: 22, local_bind_port: 15432, remote_host: "10.0.0.12", remote_port: 5432 }, status: "connected" },
+    { definition: { id: "b", name: "prod-cache", ssh_host: "cache", username: "admin", ssh_port: 22, local_bind_port: 6379, remote_host: "redis", remote_port: 6379 }, status: "idle" },
+  ];
+
+  assert.deepEqual(filterTunnels(tunnels, "prod", "connected"), [tunnels[0]]);
+  assert.deepEqual(filterTunnels(tunnels, "prod", "idle"), [tunnels[1]]);
+  assert.deepEqual(filterTunnels(tunnels, "prod", "error"), []);
+});
+
+test("filterTunnels returns empty array for no matches", () => {
+  const tunnels = [
+    { definition: { id: "a", name: "prod-db", ssh_host: "bastion", username: "admin", ssh_port: 22, local_bind_port: 15432, remote_host: "10.0.0.12", remote_port: 5432 }, status: "idle" },
+  ];
+
+  assert.deepEqual(filterTunnels(tunnels, "nonexistent", "all"), []);
+});
+
+test("filterTunnels handles null input", () => {
+  assert.deepEqual(filterTunnels(null, "", "all"), []);
 });

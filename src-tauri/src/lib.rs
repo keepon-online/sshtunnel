@@ -60,6 +60,7 @@ struct TunnelView {
     status: TunnelStatus,
     last_error: Option<String>,
     recent_log: Vec<String>,
+    connected_since: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -128,6 +129,7 @@ struct TunnelRuntime {
     recent_log: Vec<String>,
     disconnect_requested: bool,
     reconnect_pending: bool,
+    connected_since: Option<u64>,
 }
 
 impl Default for TunnelRuntime {
@@ -138,6 +140,7 @@ impl Default for TunnelRuntime {
             recent_log: Vec::new(),
             disconnect_requested: false,
             reconnect_pending: false,
+            connected_since: None,
         }
     }
 }
@@ -728,6 +731,7 @@ fn disconnect_runtime(inner: &mut InnerState, id: &str) {
         }
         runtime.process = None;
         runtime.last_error = None;
+        runtime.connected_since = None;
     }
 }
 
@@ -743,10 +747,12 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                 if status.contains("exit status: 0") || status.contains("code: 0") {
                     runtime.last_error = None;
                     runtime.reconnect_pending = false;
+                    runtime.connected_since = None;
                     push_log(runtime, "ssh process exited");
                     TunnelStatus::Idle
                 } else {
                     runtime.last_error = Some(format!("ssh exited with status {status}"));
+                    runtime.connected_since = None;
                     // 认证错误（如密码错误）不应自动重连，否则会不断产生新进程
                     let has_auth_error = is_auth_error(&runtime.recent_log);
                     runtime.reconnect_pending =
@@ -773,6 +779,7 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                     // 进程仍在运行但检测到致命错误，主动 kill 并阻止重连
                     let _ = process.kill();
                     runtime.process = None;
+                    runtime.connected_since = None;
                     runtime.reconnect_pending =
                         !runtime.disconnect_requested
                             && !is_auth_error(&runtime.recent_log)
@@ -793,6 +800,14 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                 }
 
                 runtime.last_error = None;
+                if runtime.connected_since.is_none() {
+                    runtime.connected_since = Some(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    );
+                }
                 TunnelStatus::Connected
             }
             Err(error) => {
@@ -1204,6 +1219,7 @@ fn snapshot_from_inner(
                 status: refresh_runtime(runtime),
                 last_error: runtime.last_error.clone(),
                 recent_log: runtime.recent_log.clone(),
+                connected_since: runtime.connected_since,
             }
         })
         .collect();

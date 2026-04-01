@@ -133,6 +133,75 @@
     return null;
   }
 
+  function formatDuration(epochSeconds) {
+    if (!epochSeconds) return "";
+    const now = Math.floor(Date.now() / 1000);
+    let diff = Math.max(now - epochSeconds, 0);
+    const hours = Math.floor(diff / 3600);
+    diff %= 3600;
+    const minutes = Math.floor(diff / 60);
+    const seconds = diff % 60;
+    return [hours, minutes, seconds].map((v) => String(v).padStart(2, "0")).join(":");
+  }
+
+  function detectStatusTransitions(prevTunnels, currTunnels) {
+    if (!prevTunnels || !currTunnels) return [];
+    const prevMap = new Map(prevTunnels.map((t) => [t.definition?.id, t]));
+    const transitions = [];
+    for (const curr of currTunnels) {
+      const id = curr.definition?.id;
+      if (!id) continue;
+      const prev = prevMap.get(id);
+      const prevStatus = prev?.status ?? "idle";
+      const currStatus = curr.status ?? "idle";
+      if (prevStatus !== currStatus) {
+        transitions.push({
+          tunnelId: id,
+          tunnelName: curr.definition?.name ?? id,
+          from: prevStatus,
+          to: currStatus,
+          error: curr.last_error ?? null,
+        });
+      }
+    }
+    return transitions;
+  }
+
+  function filterTunnels(tunnels, filterText, filterStatus) {
+    if (!tunnels) return [];
+
+    let result = tunnels;
+
+    if (filterStatus && filterStatus !== "all") {
+      result = result.filter((t) => t.status === filterStatus);
+    }
+
+    if (filterText) {
+      const chars = filterText.toLowerCase().split("");
+      result = result.filter((t) => {
+        const d = t.definition || {};
+        const haystack = [
+          d.name || "",
+          d.ssh_host || "",
+          d.remote_host || "",
+          d.username || "",
+          String(d.ssh_port || ""),
+          String(d.local_bind_port || ""),
+          String(d.remote_port || ""),
+        ].join(" ").toLowerCase();
+        let pos = 0;
+        for (const ch of chars) {
+          pos = haystack.indexOf(ch, pos);
+          if (pos === -1) return false;
+          pos += 1;
+        }
+        return true;
+      });
+    }
+
+    return result;
+  }
+
   function mergeTimelineLogs(tunnelLogs, testLogs) {
     return [...(Array.isArray(tunnelLogs) ? tunnelLogs : []), ...(Array.isArray(testLogs) ? testLogs : [])];
   }
@@ -255,7 +324,7 @@
     };
   }
 
-  function createTunnelListNode(document, itemView, onSelect) {
+  function createTunnelListNode(document, itemView, onSelect, onContextMenu) {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `tunnel-item${itemView.isActive ? " active" : ""}`;
@@ -280,12 +349,19 @@
     item.appendChild(badge);
 
     item.addEventListener("click", onSelect);
+    item.addEventListener("contextmenu", (e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        onContextMenu(e);
+      }
+    });
     return item;
   }
 
-  function buildTunnelListSignature(tunnels, selectedId, describeTunnelListItem) {
-    return JSON.stringify(
-      (tunnels ?? []).map((tunnel) => {
+  function buildTunnelListSignature(tunnels, selectedId, describeTunnelListItem, filterText, filterStatus) {
+    return JSON.stringify({
+      filter: `${filterText ?? ""}|${filterStatus ?? "all"}`,
+      items: (tunnels ?? []).map((tunnel) => {
         const itemView = describeTunnelListItem(tunnel, selectedId);
         return {
           id: tunnel?.definition?.id ?? "",
@@ -297,7 +373,7 @@
           isActive: itemView.isActive,
         };
       }),
-    );
+    });
   }
 
   function renderTunnelList(
@@ -308,8 +384,11 @@
     describeTunnelListItem,
     onSelectById,
     previousSignature,
+    filterText,
+    filterStatus,
+    onContextMenu,
   ) {
-    const signature = buildTunnelListSignature(tunnels, selectedId, describeTunnelListItem);
+    const signature = buildTunnelListSignature(tunnels, selectedId, describeTunnelListItem, filterText, filterStatus);
     if (signature === previousSignature) {
       return signature;
     }
@@ -318,9 +397,12 @@
 
     for (const tunnel of tunnels ?? []) {
       const itemView = describeTunnelListItem(tunnel, selectedId);
-      const item = createTunnelListNode(document, itemView, () => {
-        onSelectById(tunnel.definition.id);
-      });
+      const item = createTunnelListNode(
+        document,
+        itemView,
+        () => { onSelectById(tunnel.definition.id); },
+        onContextMenu ? (e) => { onContextMenu(tunnel, e); } : null,
+      );
       list.appendChild(item);
     }
 
@@ -384,10 +466,15 @@
       listSignature: null,
       testingConnectivity: false,
       connectivityResult: null,
+      filterText: "",
+      filterStatus: "all",
+      contextMenuTunnelId: null,
     };
 
     const refs = {
       list: document.getElementById("tunnel-list"),
+      filterSearch: document.getElementById("filter-search"),
+      filterStatusGroup: document.querySelector(".filter-status-group"),
       sshStatus: document.getElementById("ssh-status"),
       autostartStatus: document.getElementById("autostart-status"),
       autostartToggle: document.getElementById("autostart-toggle"),
@@ -433,6 +520,12 @@
       privateKeyPath: document.getElementById("private-key-path"),
       authKind: document.getElementById("auth-kind"),
       password: document.getElementById("password"),
+      contextMenu: document.getElementById("context-menu"),
+      contextMenuItems: document.getElementById("context-menu-items"),
+      toastContainer: document.getElementById("toast-container"),
+      durationDisplay: document.getElementById("duration-display"),
+      templateSelector: document.getElementById("template-selector"),
+      templateGrid: document.getElementById("template-grid"),
     };
 
     function currentTunnel() {
@@ -465,6 +558,18 @@
       refs.statusLabel.textContent = view.statusLabel;
       refs.statusCard.className = `status-card ${view.statusTone}`;
       refs.statusCard.textContent = view.statusText;
+
+      // Duration display for connected tunnels
+      if (refs.durationDisplay) {
+        const connectedSince = tunnel?.connected_since;
+        if (connectedSince && view.statusTone === "connected") {
+          refs.durationDisplay.textContent = formatDuration(connectedSince);
+          refs.durationDisplay.classList.remove("hidden");
+        } else {
+          refs.durationDisplay.classList.add("hidden");
+        }
+      }
+
       refs.statusSubtitle.textContent = view.healthText;
       refs.statusError.textContent = view.healthError;
       refs.statusError.classList.toggle("hidden", !view.healthError);
@@ -544,6 +649,7 @@
       fillForm(tunnel);
       renderEditorActions();
       renderConnectivityResult();
+      renderTemplateSelector(tunnel);
       refs.drawerBackdrop.classList.remove("hidden");
       refs.editorDrawer.classList.remove("hidden");
       refs.editorDrawer.setAttribute("aria-hidden", "false");
@@ -558,17 +664,177 @@
       clearEditorError(refs);
       renderEditorActions();
       renderConnectivityResult();
+      hideTemplateSelector();
       refs.drawerBackdrop.classList.add("hidden");
       refs.editorDrawer.classList.add("hidden");
       refs.editorDrawer.setAttribute("aria-hidden", "true");
       refs.drawerBackdrop.setAttribute("aria-hidden", "true");
     }
 
+    const TEMPLATES = [
+      { label: "PostgreSQL", remote_port: 5432, local_port: 15432 },
+      { label: "MySQL", remote_port: 3306, local_port: 13306 },
+      { label: "Redis", remote_port: 6379, local_port: 16379 },
+      { label: "HTTP", remote_port: 80, local_port: 18080 },
+      { label: "HTTPS", remote_port: 443, local_port: 18443 },
+      { label: "自定义", remote_port: 0, local_port: 0 },
+    ];
+
+    function renderTemplateSelector(tunnel) {
+      if (!refs.templateSelector || !refs.templateGrid) return;
+      const isnew = !tunnel?.definition?.id;
+      if (!isnew) {
+        hideTemplateSelector();
+        return;
+      }
+      refs.templateSelector.classList.remove("hidden");
+      refs.templateGrid.innerHTML = "";
+      for (const tmpl of TEMPLATES) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "template-btn";
+        btn.innerHTML = `<span class="template-label">${tmpl.label}</span>${
+          tmpl.remote_port
+            ? `<span class="template-port">${tmpl.local_port} → ${tmpl.remote_port}</span>`
+            : ""
+        }`;
+        btn.addEventListener("click", () => {
+          if (tmpl.remote_port) {
+            document.getElementById("remote-port").value = tmpl.remote_port;
+            document.getElementById("local-bind-port").value = tmpl.local_port;
+          }
+        });
+        refs.templateGrid.appendChild(btn);
+      }
+    }
+
+    function hideTemplateSelector() {
+      if (refs.templateSelector) {
+        refs.templateSelector.classList.add("hidden");
+      }
+    }
+
+    function hideContextMenu() {
+      state.contextMenuTunnelId = null;
+      if (refs.contextMenu) {
+        refs.contextMenu.classList.add("hidden");
+        refs.contextMenu.setAttribute("aria-hidden", "true");
+      }
+    }
+
+    function showToast({ title, message, tone, duration }) {
+      if (!refs.toastContainer) return;
+      const icons = {
+        success: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+        error: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+        info: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+      };
+
+      const toast = document.createElement("div");
+      toast.className = `toast ${tone || "info"}`;
+      toast.innerHTML = `
+        <span class="toast-icon">${icons[tone] || icons.info}</span>
+        <div class="toast-body">
+          <div class="toast-title">${title || ""}</div>
+          ${message ? `<div class="toast-message">${message}</div>` : ""}
+        </div>
+        <button type="button" class="toast-close">&times;</button>
+      `;
+
+      const closeBtn = toast.querySelector(".toast-close");
+      const removeToast = () => {
+        toast.classList.add("removing");
+        setTimeout(() => toast.remove(), 300);
+      };
+      closeBtn.addEventListener("click", removeToast);
+
+      refs.toastContainer.appendChild(toast);
+      setTimeout(removeToast, duration || 5000);
+    }
+
+    function showContextMenu(tunnel, x, y) {
+      if (!refs.contextMenu || !refs.contextMenuItems) return;
+      state.contextMenuTunnelId = tunnel.definition.id;
+      refs.contextMenuItems.innerHTML = "";
+
+      const actions = describeTunnelActions(tunnel);
+      const items = [];
+
+      if (tunnel.status === "connected") {
+        items.push({ label: "断开", action: () => invoke("disconnect_tunnel", { id: tunnel.definition.id }).then(handleSnapshot).catch(handleError) });
+      } else {
+        items.push({ label: actions.connectText, action: () => invoke("connect_tunnel", { id: tunnel.definition.id }).then(handleSnapshot).catch(handleError), disabled: actions.connectDisabled });
+      }
+
+      items.push({ label: "编辑", action: () => openEditor(tunnel) });
+      items.push({ label: "复制配置", action: () => duplicateTunnel(tunnel) });
+      items.push({ separator: true });
+      items.push({ label: "删除", danger: true, action: () => invoke("delete_tunnel", { id: tunnel.definition.id }).then((snap) => { state.snapshot = snap; state.selectedId = snap.tunnels[0]?.definition.id ?? null; render(); }).catch(handleError) });
+
+      for (const item of items) {
+        if (item.separator) {
+          const sep = document.createElement("div");
+          sep.className = "context-menu-separator";
+          refs.contextMenuItems.appendChild(sep);
+          continue;
+        }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "context-menu-item" + (item.danger ? " danger" : "");
+        btn.textContent = item.label;
+        btn.disabled = !!item.disabled;
+        btn.addEventListener("click", () => {
+          hideContextMenu();
+          item.action();
+        });
+        refs.contextMenuItems.appendChild(btn);
+      }
+
+      // Position and show, clamped to viewport
+      const menu = refs.contextMenu;
+      menu.classList.remove("hidden");
+      menu.setAttribute("aria-hidden", "false");
+      const rect = menu.getBoundingClientRect();
+      const maxX = window.innerWidth - rect.width - 8;
+      const maxY = window.innerHeight - rect.height - 8;
+      menu.style.left = Math.min(x, maxX) + "px";
+      menu.style.top = Math.min(y, maxY) + "px";
+    }
+
+    function handleSnapshot(snap) {
+      state.snapshot = snap;
+      render();
+    }
+
+    function handleError(error) {
+      refs.statusCard.className = "status-card error";
+      refs.statusCard.textContent = toErrorMessage(error);
+    }
+
+    async function duplicateTunnel(tunnel) {
+      try {
+        const def = { ...tunnel.definition };
+        def.id = "";
+        def.name = (def.name || "") + " (副本)";
+        state.snapshot = await invoke("save_tunnel", {
+          payload: { tunnel: def, password: null },
+        });
+        const newId = state.snapshot.tunnels.at(-1)?.definition.id;
+        if (newId) state.selectedId = newId;
+        render();
+      } catch (error) {
+        handleError(error);
+      }
+    }
+
     function renderList() {
+      const allTunnels = state.snapshot?.tunnels ?? [];
+      const filtered = filterTunnels(allTunnels, state.filterText, state.filterStatus);
+
       state.listSignature = renderTunnelList(
         refs.list,
         document,
-        state.snapshot?.tunnels ?? [],
+        filtered,
         state.selectedId,
         describeTunnelListItem,
         (id) => {
@@ -576,10 +842,15 @@
           render();
         },
         state.listSignature,
+        state.filterText,
+        state.filterStatus,
+        (tunnel, e) => {
+          showContextMenu(tunnel, e.clientX, e.clientY);
+        },
       );
 
       // Post-render: attach one eye toggle per tunnel item
-      const tunnels = state.snapshot?.tunnels ?? [];
+      const tunnels = filtered;
       const items = refs.list.querySelectorAll(".tunnel-item");
       items.forEach((item, idx) => {
         const tunnel = tunnels[idx];
@@ -648,11 +919,47 @@
         renderEditorActions();
         renderConnectivityResult();
       }
+
+      // Duration timer management
+      if (state.durationTimer) {
+        clearInterval(state.durationTimer);
+        state.durationTimer = null;
+      }
+      if (tunnel?.connected_since && tunnel?.status === "connected") {
+        updateDurationDisplay(tunnel.connected_since);
+        state.durationTimer = setInterval(() => {
+          updateDurationDisplay(tunnel.connected_since);
+        }, 1000);
+      }
+    }
+
+    function updateDurationDisplay(connectedSince) {
+      if (!refs.durationDisplay) return;
+      const formatted = formatDuration(connectedSince);
+      if (formatted) {
+        refs.durationDisplay.textContent = formatted;
+        refs.durationDisplay.classList.remove("hidden");
+      } else {
+        refs.durationDisplay.classList.add("hidden");
+      }
     }
 
     async function refresh() {
       try {
+        const prevTunnels = state.snapshot?.tunnels ?? null;
         state.snapshot = await invoke("load_state");
+        const transitions = detectStatusTransitions(prevTunnels, state.snapshot?.tunnels);
+        for (const t of transitions) {
+          if (t.to === "connected" && t.from === "idle") {
+            showToast({ title: "隧道已连接", message: t.tunnelName, tone: "success" });
+          } else if (t.to === "connected" && t.from === "error") {
+            showToast({ title: "已自动重连", message: t.tunnelName, tone: "success" });
+          } else if (t.to === "error") {
+            showToast({ title: "连接异常", message: `${t.tunnelName}${t.error ? " — " + t.error : ""}`, tone: "error" });
+          } else if (t.to === "idle" && t.from === "connected") {
+            showToast({ title: "隧道已断开", message: t.tunnelName, tone: "info" });
+          }
+        }
         render();
       } catch (error) {
         refs.statusCard.className = "status-card error";
@@ -823,6 +1130,68 @@
     refs.cancelEdit.addEventListener("click", closeEditor);
     refs.drawerBackdrop.addEventListener("click", closeEditor);
     refs.authKind.addEventListener("change", syncAuthFields);
+
+    // Global keyboard shortcuts
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target?.tagName ?? "").toLowerCase();
+      if (tag === "input" || tag === "select" || tag === "textarea") return;
+
+      const mod = e.ctrlKey || e.metaKey;
+
+      if (mod && e.key === "n") {
+        e.preventDefault();
+        openEditor(null);
+      } else if (mod && e.key === "Enter") {
+        e.preventDefault();
+        if (state.selectedId && !refs.connectBtn.disabled) {
+          refs.connectBtn.click();
+        }
+      } else if (mod && e.key === "Delete") {
+        e.preventDefault();
+        if (state.selectedId && !refs.deleteBtn.disabled) {
+          refs.deleteBtn.click();
+        }
+      } else if (e.key === "Escape") {
+        if (state.contextMenuTunnelId) {
+          hideContextMenu();
+        } else if (state.editorOpen) {
+          closeEditor();
+        } else if (refs.settingsModal?.open) {
+          refs.settingsModal.close();
+        }
+      }
+    });
+
+    // Filter bar events
+    if (refs.filterSearch) {
+      refs.filterSearch.addEventListener("input", (e) => {
+        state.filterText = e.target.value.trim().toLowerCase();
+        state.listSignature = null;
+        render();
+      });
+    }
+    if (refs.filterStatusGroup) {
+      refs.filterStatusGroup.addEventListener("click", (e) => {
+        const btn = e.target.closest(".filter-status-btn");
+        if (!btn) return;
+        const filter = btn.getAttribute("data-filter");
+        if (!filter) return;
+        state.filterStatus = filter;
+        state.listSignature = null;
+        refs.filterStatusGroup.querySelectorAll(".filter-status-btn").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        render();
+      });
+    }
+    // Context menu dismiss events
+    document.addEventListener("click", (e) => {
+      if (refs.contextMenu && !refs.contextMenu.contains(e.target)) {
+        hideContextMenu();
+      }
+    });
+    window.addEventListener("blur", hideContextMenu);
+
     refs.form.addEventListener("input", () => {
       if (state.connectivityResult) {
         resetConnectivityResult();
@@ -881,6 +1250,8 @@
     buildCommandCenterView,
     describeConnectivityResult,
     createTunnelListNode,
+    detectStatusTransitions,
+    filterTunnels,
     renderTunnelList,
     mapStatusSummaryToCommandCenterCards,
     DESKTOP_ONLY_MESSAGE,

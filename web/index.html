@@ -51,6 +51,15 @@
             <h2>隧道列表</h2>
           </div>
         </div>
+        <div class="filter-bar">
+          <input id="filter-search" type="text" placeholder="搜索隧道..." autocomplete="off">
+          <div class="filter-status-group">
+            <button type="button" class="filter-status-btn active" data-filter="all">全部</button>
+            <button type="button" class="filter-status-btn" data-filter="connected">已连接</button>
+            <button type="button" class="filter-status-btn" data-filter="idle">空闲</button>
+            <button type="button" class="filter-status-btn" data-filter="error">错误</button>
+          </div>
+        </div>
         <div id="tunnel-list" class="tunnel-list"></div>
       </section>
     </aside>
@@ -74,6 +83,7 @@
           <div class="hero-status">
             <p id="status-label" class="eyebrow">连接状态</p>
             <div id="status-card" class="status-card idle">未选择</div>
+            <div id="duration-display" class="duration-display hidden"></div>
           </div>
           <div class="hero-properties">
             <div class="property-row">
@@ -132,6 +142,9 @@
   </div>
 
   <div id="drawer-backdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+  <div id="context-menu" class="context-menu hidden" aria-hidden="true">
+    <div id="context-menu-items"></div>
+  </div>
   <aside id="editor-drawer" class="editor-drawer hidden" aria-hidden="true">
     <div class="drawer-head">
       <div>
@@ -142,6 +155,10 @@
     </div>
 
     <form id="tunnel-form" class="form-grid">
+      <div id="template-selector" class="template-selector hidden">
+        <p class="eyebrow">快速模板</p>
+        <div id="template-grid" class="template-grid"></div>
+      </div>
       <input type="hidden" id="tunnel-id">
 
       <label>
@@ -255,6 +272,8 @@
       </div>
     </div>
   </dialog>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <script src="./view-model.js"></script>
   <script src="./app.js"></script>

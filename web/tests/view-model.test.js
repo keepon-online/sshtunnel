@@ -10,6 +10,7 @@ const {
   describeDiagnosticLogPanel,
   describeStatusSummaryCards,
   describeWorkspacePanel,
+  formatDuration,
   summarizeSnapshotMeta,
   describeCommandCenterHero,
   describeCommandCenterCards,
@@ -341,4 +342,21 @@ test("describeCommandCenterTimeline summarizes status events and ssh output", ()
   assert.equal(summary.summaryText, "最近 2 条状态事件，1 条 SSH 输出");
   assert.equal(summary.statusEvents.length, 2);
   assert.equal(summary.sshOutput.length, 1);
+});
+
+test("formatDuration formats 0 seconds as 00:00:00", () => {
+  const now = Math.floor(Date.now() / 1000);
+  assert.equal(formatDuration(now), "00:00:00");
+});
+
+test("formatDuration formats elapsed time correctly", () => {
+  const now = Math.floor(Date.now() / 1000);
+  // 1 hour, 1 minute, 1 second ago
+  const past = now - 3661;
+  assert.equal(formatDuration(past), "01:01:01");
+});
+
+test("formatDuration returns empty for null/undefined", () => {
+  assert.equal(formatDuration(null), "");
+  assert.equal(formatDuration(undefined), "");
 });
