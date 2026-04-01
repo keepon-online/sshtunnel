@@ -67,8 +67,7 @@ impl ManagedProcess {
             ManagedProcessInner::Prompted(child) => {
                 let status = child.child.try_wait().map_err(|error| error.to_string())?;
                 if status.is_some() {
-                    let _ = child.child.wait();
-                    join_reader(&mut child.reader_thread);
+                    detach_reader(&mut child.reader_thread);
                 }
                 Ok(status.map(|item| format!("{item:?}")))
             }
@@ -293,6 +292,10 @@ fn join_reader(reader_thread: &mut Option<JoinHandle<()>>) {
     }
 }
 
+fn detach_reader(reader_thread: &mut Option<JoinHandle<()>>) {
+    let _ = reader_thread.take();
+}
+
 /// 去除 ANSI/VT100 转义序列（ESC [ ... 终止符）
 /// Windows ConPTY 输出常夹带光标控制、颜色等控制字符，
 /// 导致原始文本匹配密码提示符失败
@@ -335,11 +338,20 @@ fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: &str) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
+        time::{Duration, Instant},
+    };
 
+    use portable_pty::{Child as PtyChild, ChildKiller, ExitStatus as PtyExitStatus};
     use sshtunnel_core::ssh_launch::{CommandSpec, LaunchPlan};
 
-    use super::{windows_process_creation_flags, ManagedProcess};
+    use super::{
+        windows_process_creation_flags, ManagedProcess, ManagedProcessInner, PromptedProcess,
+    };
 
     #[test]
     fn native_process_captures_stderr_lines() {
@@ -447,6 +459,34 @@ mod tests {
     }
 
     #[test]
+    fn prompted_try_wait_does_not_block_on_exit_cleanup() {
+        let wait_calls = Arc::new(AtomicUsize::new(0));
+        let mut process = ManagedProcess {
+            inner: ManagedProcessInner::Prompted(PromptedProcess {
+                child: Box::new(ExitedPromptedChild {
+                    wait_calls: Arc::clone(&wait_calls),
+                }),
+                reader_thread: Some(std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_secs(2));
+                })),
+            }),
+            logs: Arc::new(Mutex::new(Vec::new())),
+            needs_connection_signal: true,
+        };
+
+        let before = Instant::now();
+        let status = process.try_wait().expect("query exited prompted child");
+        let elapsed = before.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "try_wait blocked on cleanup for {elapsed:?}"
+        );
+        assert_eq!(wait_calls.load(Ordering::SeqCst), 0);
+        assert!(status.is_some());
+    }
+
+    #[test]
     fn windows_process_creation_flags_match_platform_behavior() {
         #[cfg(target_os = "windows")]
         assert_eq!(windows_process_creation_flags(), 0x0800_0000);
@@ -513,6 +553,44 @@ mod tests {
         CommandSpec {
             program: "sh".into(),
             args: vec!["-c".into(), "echo 'promptless failure' >&2; exit 1".into()],
+        }
+    }
+
+    #[derive(Debug)]
+    struct ExitedPromptedChild {
+        wait_calls: Arc<AtomicUsize>,
+    }
+
+    impl ChildKiller for ExitedPromptedChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(Self {
+                wait_calls: Arc::clone(&self.wait_calls),
+            })
+        }
+    }
+
+    impl PtyChild for ExitedPromptedChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<PtyExitStatus>> {
+            Ok(Some(PtyExitStatus::with_exit_code(1)))
+        }
+
+        fn wait(&mut self) -> std::io::Result<PtyExitStatus> {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(PtyExitStatus::with_exit_code(1))
+        }
+
+        fn process_id(&self) -> Option<u32> {
+            Some(1)
+        }
+
+        #[cfg(target_os = "windows")]
+        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
         }
     }
 }
