@@ -737,6 +737,8 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
     if let Some(process) = runtime.process.as_mut() {
         match process.try_wait() {
             Ok(Some(status)) => {
+                let prompted_exited_before_connecting =
+                    process.needs_connection_signal() && !has_connection_signal(&runtime.recent_log);
                 runtime.process = None;
                 if status.contains("exit status: 0") || status.contains("code: 0") {
                     runtime.last_error = None;
@@ -748,23 +750,40 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                     // 认证错误（如密码错误）不应自动重连，否则会不断产生新进程
                     let has_auth_error = is_auth_error(&runtime.recent_log);
                     runtime.reconnect_pending =
-                        !runtime.disconnect_requested && !has_auth_error;
+                        !runtime.disconnect_requested
+                            && !has_auth_error
+                            && !prompted_exited_before_connecting;
                     push_log(runtime, &format!("ssh exited with status {status}"));
                     if has_auth_error {
                         push_log(runtime, "auto-reconnect skipped: authentication error detected");
+                    } else if prompted_exited_before_connecting {
+                        push_log(
+                            runtime,
+                            "auto-reconnect skipped: prompted session exited before connecting",
+                        );
                     }
                     TunnelStatus::Error
                 }
             }
             Ok(None) => {
                 if let Some(error) = detect_runtime_error(&runtime.recent_log) {
+                    let prompted_exited_before_connecting =
+                        process.needs_connection_signal() && !has_connection_signal(&runtime.recent_log);
                     runtime.last_error = Some(error.clone());
                     // 进程仍在运行但检测到致命错误，主动 kill 并阻止重连
                     let _ = process.kill();
                     runtime.process = None;
                     runtime.reconnect_pending =
-                        !runtime.disconnect_requested && !is_auth_error(&runtime.recent_log);
+                        !runtime.disconnect_requested
+                            && !is_auth_error(&runtime.recent_log)
+                            && !prompted_exited_before_connecting;
                     push_log(runtime, "killed ssh process due to detected error");
+                    if prompted_exited_before_connecting {
+                        push_log(
+                            runtime,
+                            "auto-reconnect skipped: prompted session exited before connecting",
+                        );
+                    }
                     return TunnelStatus::Error;
                 }
 
@@ -1474,6 +1493,27 @@ mod runtime_tests {
     }
 
     #[test]
+    fn refresh_runtime_skips_reconnect_when_prompted_session_exits_before_connecting() {
+        let mut runtime = runtime_with_launch(LaunchPlan::PromptedPassword {
+            command: prompted_early_failure_command(),
+            password: "s3cr3t".into(),
+            prompt: "assword:".into(),
+        });
+
+        let status = wait_for_status_with_log(&mut runtime, |runtime| runtime.process.is_none());
+
+        assert!(matches!(status, TunnelStatus::Error));
+        assert!(!runtime.reconnect_pending);
+        assert!(
+            runtime.recent_log.iter().any(|line| {
+                line.contains("auto-reconnect skipped: prompted session exited before connecting")
+            }),
+            "expected prompted reconnect skip log, got {:?}",
+            runtime.recent_log
+        );
+    }
+
+    #[test]
     fn recent_tray_items_do_not_mark_prompted_waiting_session_connected() {
         let mut runtime = runtime_with_launch(LaunchPlan::PromptedPassword {
             command: prompted_waiting_command(),
@@ -1683,6 +1723,22 @@ mod runtime_tests {
         CommandSpec {
             program: "sh".into(),
             args: vec!["-c".into(), "echo 'Permission denied' >&2; sleep 5".into()],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn prompted_early_failure_command() -> CommandSpec {
+        CommandSpec {
+            program: "cmd".into(),
+            args: vec!["/C".into(), "(echo fatal startup failure 1>&2) & exit /b 42".into()],
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn prompted_early_failure_command() -> CommandSpec {
+        CommandSpec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "echo 'fatal startup failure' >&2; exit 42".into()],
         }
     }
 }
