@@ -1,8 +1,10 @@
 use std::{
     io::{BufRead, BufReader, Read, Write},
+    sync::mpsc::{self, Receiver, RecvTimeoutError},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use crate::debug_trace::trace_debug;
@@ -35,6 +37,7 @@ struct NativeProcess {
 struct PromptedProcess {
     child: Box<dyn portable_pty::Child + Send>,
     reader_thread: Option<JoinHandle<()>>,
+    reader_done: Receiver<()>,
     _pty_master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
@@ -73,7 +76,7 @@ impl ManagedProcess {
                 let status = child.child.try_wait().map_err(|error| error.to_string())?;
                 if status.is_some() {
                     trace_debug("managed_process", "prompted try_wait exited");
-                    detach_reader(&mut child.reader_thread);
+                    settle_prompted_reader(&mut child.reader_thread, &child.reader_done);
                 }
                 Ok(status.map(|item| format!("{item:?}")))
             }
@@ -92,7 +95,7 @@ impl ManagedProcess {
             ManagedProcessInner::Prompted(child) => {
                 trace_debug("managed_process", "prompted kill begin");
                 child.child.kill().map_err(|error| error.to_string())?;
-                detach_reader(&mut child.reader_thread);
+                settle_prompted_reader(&mut child.reader_thread, &child.reader_done);
                 trace_debug("managed_process", "prompted kill end");
             }
         }
@@ -174,7 +177,8 @@ impl ManagedProcess {
         let log_sink_writer = Arc::clone(&logs);
 
         // 使用 channel 通知 writer 线程：reader 检测到了密码提示符
-        let (prompt_tx, prompt_rx) = std::sync::mpsc::channel::<()>();
+        let (prompt_tx, prompt_rx) = mpsc::channel::<()>();
+        let (reader_done_tx, reader_done_rx) = mpsc::channel::<()>();
 
         // Reader 线程：读取 PTY 输出，检测密码提示符
         let reader_thread = thread::spawn(move || {
@@ -213,6 +217,8 @@ impl ManagedProcess {
                     }
                 }
             }
+
+            let _ = reader_done_tx.send(());
         });
 
         // Writer 线程：等待提示符通知或超时后盲发密码
@@ -246,6 +252,7 @@ impl ManagedProcess {
             inner: ManagedProcessInner::Prompted(PromptedProcess {
                 child,
                 reader_thread: Some(reader_thread),
+                reader_done: reader_done_rx,
                 _pty_master: master,
             }),
             logs,
@@ -312,6 +319,16 @@ fn detach_reader(reader_thread: &mut Option<JoinHandle<()>>) {
     let _ = reader_thread.take();
 }
 
+fn settle_prompted_reader(
+    reader_thread: &mut Option<JoinHandle<()>>,
+    reader_done: &Receiver<()>,
+) {
+    match reader_done.recv_timeout(Duration::from_millis(150)) {
+        Ok(()) | Err(RecvTimeoutError::Disconnected) => join_reader(reader_thread),
+        Err(RecvTimeoutError::Timeout) => detach_reader(reader_thread),
+    }
+}
+
 /// 去除 ANSI/VT100 转义序列（ESC [ ... 终止符）
 /// Windows ConPTY 输出常夹带光标控制、颜色等控制字符，
 /// 导致原始文本匹配密码提示符失败
@@ -355,6 +372,7 @@ fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: &str) {
 #[cfg(test)]
 mod tests {
     use std::{
+        sync::mpsc,
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc, Mutex,
@@ -478,6 +496,7 @@ mod tests {
     #[test]
     fn prompted_try_wait_does_not_block_on_exit_cleanup() {
         let wait_calls = Arc::new(AtomicUsize::new(0));
+        let (_reader_done_tx, reader_done_rx) = mpsc::channel();
         let mut process = ManagedProcess {
             inner: ManagedProcessInner::Prompted(PromptedProcess {
                 child: Box::new(ExitedPromptedChild {
@@ -486,6 +505,7 @@ mod tests {
                 reader_thread: Some(std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(2));
                 })),
+                reader_done: reader_done_rx,
                 _pty_master: Box::new(DropTrackingMasterPty::default()),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
@@ -508,6 +528,7 @@ mod tests {
     fn prompted_kill_does_not_block_on_cleanup() {
         let wait_calls = Arc::new(AtomicUsize::new(0));
         let kill_calls = Arc::new(AtomicUsize::new(0));
+        let (_reader_done_tx, reader_done_rx) = mpsc::channel();
         let mut process = ManagedProcess {
             inner: ManagedProcessInner::Prompted(PromptedProcess {
                 child: Box::new(KillablePromptedChild {
@@ -517,6 +538,7 @@ mod tests {
                 reader_thread: Some(std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(2));
                 })),
+                reader_done: reader_done_rx,
                 _pty_master: Box::new(DropTrackingMasterPty::default()),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
@@ -538,12 +560,14 @@ mod tests {
     #[test]
     fn prompted_process_retains_pty_master_until_process_drop() {
         let drops = Arc::new(AtomicUsize::new(0));
+        let (_reader_done_tx, reader_done_rx) = mpsc::channel();
         let process = ManagedProcess {
             inner: ManagedProcessInner::Prompted(PromptedProcess {
                 child: Box::new(ExitedPromptedChild {
                     wait_calls: Arc::new(AtomicUsize::new(0)),
                 }),
                 reader_thread: None,
+                reader_done: reader_done_rx,
                 _pty_master: Box::new(DropTrackingMasterPty {
                     drops: Arc::clone(&drops),
                 }),
