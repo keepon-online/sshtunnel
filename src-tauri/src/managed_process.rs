@@ -39,6 +39,7 @@ struct PromptedProcess {
     reader_thread: Option<JoinHandle<()>>,
     reader_done: Receiver<()>,
     _pty_master: Box<dyn portable_pty::MasterPty + Send>,
+    _pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
 impl ManagedProcess {
@@ -166,15 +167,17 @@ impl ManagedProcess {
         let mut reader = master
             .try_clone_reader()
             .map_err(|error| error.to_string())?;
-        let mut writer = master
+        let writer = master
             .take_writer()
             .map_err(|error| error.to_string())?;
+        let writer = Arc::new(Mutex::new(writer));
 
         let logs = Arc::new(Mutex::new(Vec::new()));
         let password_for_writer = password.to_string();
         let prompt = prompt.to_ascii_lowercase();
         let log_sink = Arc::clone(&logs);
         let log_sink_writer = Arc::clone(&logs);
+        let writer_for_thread = Arc::clone(&writer);
 
         // 使用 channel 通知 writer 线程：reader 检测到了密码提示符
         let (prompt_tx, prompt_rx) = mpsc::channel::<()>();
@@ -239,12 +242,14 @@ impl ManagedProcess {
                 );
             }
 
-            if writer.write_all(password_for_writer.as_bytes()).is_ok()
-                && writer.write_all(b"\r").is_ok()
-            {
-                let _ = writer.flush();
-                trace_debug("managed_process", "prompted writer sent password");
-                push_log(&log_sink_writer, "password sent to interactive ssh session");
+            if let Ok(mut guard) = writer_for_thread.lock() {
+                if guard.write_all(password_for_writer.as_bytes()).is_ok()
+                    && guard.write_all(b"\r").is_ok()
+                {
+                    let _ = guard.flush();
+                    trace_debug("managed_process", "prompted writer sent password");
+                    push_log(&log_sink_writer, "password sent to interactive ssh session");
+                }
             }
         });
 
@@ -254,6 +259,7 @@ impl ManagedProcess {
                 reader_thread: Some(reader_thread),
                 reader_done: reader_done_rx,
                 _pty_master: master,
+                _pty_writer: writer,
             }),
             logs,
             needs_connection_signal: true,
@@ -372,6 +378,7 @@ fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: &str) {
 #[cfg(test)]
 mod tests {
     use std::{
+        io::Write,
         sync::mpsc,
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -507,6 +514,7 @@ mod tests {
                 })),
                 reader_done: reader_done_rx,
                 _pty_master: Box::new(DropTrackingMasterPty::default()),
+                _pty_writer: Arc::new(Mutex::new(Box::new(std::io::Cursor::new(Vec::<u8>::new())))),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
             needs_connection_signal: true,
@@ -540,6 +548,7 @@ mod tests {
                 })),
                 reader_done: reader_done_rx,
                 _pty_master: Box::new(DropTrackingMasterPty::default()),
+                _pty_writer: Arc::new(Mutex::new(Box::new(std::io::Cursor::new(Vec::<u8>::new())))),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
             needs_connection_signal: true,
@@ -571,6 +580,32 @@ mod tests {
                 _pty_master: Box::new(DropTrackingMasterPty {
                     drops: Arc::clone(&drops),
                 }),
+                _pty_writer: Arc::new(Mutex::new(Box::new(std::io::Cursor::new(Vec::<u8>::new())))),
+            }),
+            logs: Arc::new(Mutex::new(Vec::new())),
+            needs_connection_signal: true,
+        };
+
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(process);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prompted_process_retains_pty_writer_until_process_drop() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let (_reader_done_tx, reader_done_rx) = mpsc::channel();
+        let process = ManagedProcess {
+            inner: ManagedProcessInner::Prompted(PromptedProcess {
+                child: Box::new(ExitedPromptedChild {
+                    wait_calls: Arc::new(AtomicUsize::new(0)),
+                }),
+                reader_thread: None,
+                reader_done: reader_done_rx,
+                _pty_master: Box::new(DropTrackingMasterPty::default()),
+                _pty_writer: Arc::new(Mutex::new(Box::new(DropTrackingWriter {
+                    drops: Arc::clone(&drops),
+                }))),
             }),
             logs: Arc::new(Mutex::new(Vec::new())),
             needs_connection_signal: true,
@@ -766,6 +801,27 @@ mod tests {
         #[cfg(unix)]
         fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
             None
+        }
+    }
+
+    #[derive(Debug)]
+    struct DropTrackingWriter {
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Drop for DropTrackingWriter {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl Write for DropTrackingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
         }
     }
 }
