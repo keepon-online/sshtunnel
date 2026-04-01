@@ -1,3 +1,4 @@
+mod debug_trace;
 mod managed_process;
 mod tray_model;
 #[cfg(test)]
@@ -19,6 +20,7 @@ use std::{
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 use keyring::Entry;
+use debug_trace::{init_debug_trace, trace_debug};
 use managed_process::ManagedProcess;
 use serde::{Deserialize, Serialize};
 use sshtunnel_core::{
@@ -159,6 +161,8 @@ struct AppState {
 impl AppState {
     fn new() -> Self {
         let config_path = resolve_config_path();
+        init_debug_trace(&config_path);
+        trace_debug("app_state", &format!("config path: {}", config_path.display()));
         let tunnels = load_config(&config_path).unwrap_or_default().tunnels;
 
         Self {
@@ -176,6 +180,7 @@ impl AppState {
 
 #[tauri::command]
 fn load_state(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<AppSnapshot, String> {
+    trace_debug("load_state", "begin");
     snapshot(&state, &app)
 }
 
@@ -263,15 +268,19 @@ fn connect_tunnel(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
+    trace_debug("connect_tunnel", &format!("begin id={id}"));
     ensure_ssh_available()?;
 
     let mut inner = state
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
+    trace_debug("connect_tunnel", &format!("lock acquired id={id}"));
     launch_tunnel(&mut inner, &id, get_password)?;
+    trace_debug("connect_tunnel", &format!("launch_tunnel completed id={id}"));
 
     refresh_tray_menu(&app, &inner)?;
+    trace_debug("connect_tunnel", &format!("refresh_tray_menu completed id={id}"));
     snapshot_from_inner(&state, &app, &mut inner)
 }
 
@@ -281,12 +290,16 @@ fn disconnect_tunnel(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
+    trace_debug("disconnect_tunnel", &format!("begin id={id}"));
     let mut inner = state
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
+    trace_debug("disconnect_tunnel", &format!("lock acquired id={id}"));
     apply_disconnect(&mut inner, &id);
+    trace_debug("disconnect_tunnel", &format!("apply_disconnect completed id={id}"));
     refresh_tray_menu(&app, &inner)?;
+    trace_debug("disconnect_tunnel", &format!("refresh_tray_menu completed id={id}"));
     snapshot_from_inner(&state, &app, &mut inner)
 }
 
@@ -507,13 +520,18 @@ fn launch_tunnel<F>(inner: &mut InnerState, id: &str, load_password: F) -> Resul
 where
     F: FnOnce(&str) -> Result<String, String>,
 {
+    trace_debug("launch_tunnel", &format!("prepare begin id={id}"));
     let prepared = match prepare_connect_request(inner, id, load_password)? {
         ConnectPreparation::Launch(prepared) => prepared,
         ConnectPreparation::MissingCredential => return Ok(()),
     };
+    trace_debug("launch_tunnel", &format!("prepare completed id={id}"));
     let plan = build_launch_plan(&prepared.tunnel, prepared.password.as_deref())?;
+    trace_debug("launch_tunnel", &format!("plan built id={id}"));
     let process = ManagedProcess::spawn(plan)?;
+    trace_debug("launch_tunnel", &format!("process spawned id={id}"));
     apply_connected_runtime(inner, id, process);
+    trace_debug("launch_tunnel", &format!("runtime applied id={id}"));
     Ok(())
 }
 
@@ -551,9 +569,11 @@ fn apply_startup_auto_connect(inner: &mut InnerState) {
 }
 
 fn maintain_runtime_connections(inner: &mut InnerState) {
+    trace_debug("maintain_runtime_connections", "begin");
     let ids: Vec<String> = inner.tunnels.iter().map(|tunnel| tunnel.id.clone()).collect();
     for id in ids {
         if let Some(runtime) = inner.runtimes.get_mut(&id) {
+            trace_debug("maintain_runtime_connections", &format!("refresh id={id}"));
             let _ = refresh_runtime(runtime);
         }
     }
@@ -562,6 +582,7 @@ fn maintain_runtime_connections(inner: &mut InnerState) {
         if let Some(runtime) = inner.runtimes.get_mut(&id) {
             runtime.reconnect_pending = false;
         }
+        trace_debug("maintain_runtime_connections", &format!("relaunch id={id}"));
         let _ = launch_tunnel(inner, &id, get_password);
     }
 }
@@ -721,13 +742,17 @@ fn should_refresh_tray_menu(
 
 fn disconnect_runtime(inner: &mut InnerState, id: &str) {
     if let Some(runtime) = inner.runtimes.get_mut(id) {
+        trace_debug("disconnect_runtime", &format!("begin id={id}"));
         let _ = flush_process_logs(runtime);
         if let Some(process) = runtime.process.as_mut() {
+            trace_debug("disconnect_runtime", &format!("kill begin id={id}"));
             let _ = process.kill();
+            trace_debug("disconnect_runtime", &format!("kill end id={id}"));
             push_log(runtime, "stopped ssh process");
         }
         runtime.process = None;
         runtime.last_error = None;
+        trace_debug("disconnect_runtime", &format!("end id={id}"));
     }
 }
 
@@ -735,8 +760,10 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
     let _ = flush_process_logs(runtime);
 
     if let Some(process) = runtime.process.as_mut() {
+        trace_debug("refresh_runtime", "try_wait begin");
         match process.try_wait() {
             Ok(Some(status)) => {
+                trace_debug("refresh_runtime", &format!("try_wait exited status={status}"));
                 let prompted_exited_before_connecting =
                     process.needs_connection_signal() && !has_connection_signal(&runtime.recent_log);
                 runtime.process = None;
@@ -766,12 +793,16 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                 }
             }
             Ok(None) => {
+                trace_debug("refresh_runtime", "try_wait pending");
                 if let Some(error) = detect_runtime_error(&runtime.recent_log) {
                     let prompted_exited_before_connecting =
                         process.needs_connection_signal() && !has_connection_signal(&runtime.recent_log);
                     runtime.last_error = Some(error.clone());
                     // 进程仍在运行但检测到致命错误，主动 kill 并阻止重连
+                    trace_debug("refresh_runtime", &format!("detected error: {error}"));
+                    trace_debug("refresh_runtime", "kill begin");
                     let _ = process.kill();
+                    trace_debug("refresh_runtime", "kill end");
                     runtime.process = None;
                     runtime.reconnect_pending =
                         !runtime.disconnect_requested
@@ -796,6 +827,7 @@ fn refresh_runtime(runtime: &mut TunnelRuntime) -> TunnelStatus {
                 TunnelStatus::Connected
             }
             Err(error) => {
+                trace_debug("refresh_runtime", &format!("try_wait error: {error}"));
                 runtime.last_error = Some(error.to_string());
                 push_log(runtime, &format!("failed to query process status: {error}"));
                 TunnelStatus::Error
@@ -1182,10 +1214,12 @@ fn autostart_enabled(app: &tauri::AppHandle) -> bool {
 }
 
 fn snapshot(state: &AppState, app: &tauri::AppHandle) -> Result<AppSnapshot, String> {
+    trace_debug("snapshot", "begin");
     let mut inner = state
         .inner
         .lock()
         .map_err(|_| "state poisoned".to_string())?;
+    trace_debug("snapshot", "lock acquired");
     snapshot_from_inner(state, app, &mut inner)
 }
 
@@ -1194,11 +1228,19 @@ fn snapshot_from_inner(
     app: &tauri::AppHandle,
     inner: &mut InnerState,
 ) -> Result<AppSnapshot, String> {
+    trace_debug(
+        "snapshot_from_inner",
+        &format!("begin tunnels={}", inner.tunnels.len()),
+    );
     let tunnels = inner
         .tunnels
         .iter()
         .map(|definition| {
             let runtime = inner.runtimes.entry(definition.id.clone()).or_default();
+            trace_debug(
+                "snapshot_from_inner",
+                &format!("refreshing definition_id={}", definition.id),
+            );
             TunnelView {
                 definition: definition.clone(),
                 status: refresh_runtime(runtime),
@@ -1207,6 +1249,7 @@ fn snapshot_from_inner(
             }
         })
         .collect();
+    trace_debug("snapshot_from_inner", "runtime refresh completed");
 
     Ok(AppSnapshot {
         tunnels,
@@ -1264,6 +1307,7 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
 }
 
 fn refresh_tray_menu(app: &tauri::AppHandle, inner: &InnerState) -> Result<(), String> {
+    trace_debug("refresh_tray_menu", "begin");
     let tray = app
         .tray_by_id(MAIN_TRAY_ID)
         .ok_or_else(|| "tray icon not found".to_string())?;
@@ -1274,10 +1318,13 @@ fn refresh_tray_menu(app: &tauri::AppHandle, inner: &InnerState) -> Result<(), S
         .lock()
         .map_err(|_| "tray signature poisoned".to_string())?;
     if !should_refresh_tray_menu(&mut signature, &recent_items) {
+        trace_debug("refresh_tray_menu", "skipped");
         return Ok(());
     }
     let menu = build_tray_menu(app, &recent_items).map_err(|error| error.to_string())?;
-    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+    let result = tray.set_menu(Some(menu)).map_err(|error| error.to_string());
+    trace_debug("refresh_tray_menu", "end");
+    result
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {

@@ -5,6 +5,8 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use crate::debug_trace::trace_debug;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -37,6 +39,7 @@ struct PromptedProcess {
 
 impl ManagedProcess {
     pub fn spawn(plan: LaunchPlan) -> Result<Self, String> {
+        trace_debug("managed_process", "spawn begin");
         match plan {
             LaunchPlan::Native(command) => Self::spawn_native(command),
             LaunchPlan::PromptedPassword {
@@ -59,6 +62,7 @@ impl ManagedProcess {
             ManagedProcessInner::Native(child) => {
                 let status = child.child.try_wait().map_err(|error| error.to_string())?;
                 if status.is_some() {
+                    trace_debug("managed_process", "native try_wait exited");
                     let _ = child.child.wait();
                     join_reader(&mut child.reader_thread);
                 }
@@ -67,6 +71,7 @@ impl ManagedProcess {
             ManagedProcessInner::Prompted(child) => {
                 let status = child.child.try_wait().map_err(|error| error.to_string())?;
                 if status.is_some() {
+                    trace_debug("managed_process", "prompted try_wait exited");
                     detach_reader(&mut child.reader_thread);
                 }
                 Ok(status.map(|item| format!("{item:?}")))
@@ -77,13 +82,17 @@ impl ManagedProcess {
     pub fn kill(&mut self) -> Result<(), String> {
         match &mut self.inner {
             ManagedProcessInner::Native(child) => {
+                trace_debug("managed_process", "native kill begin");
                 child.child.kill().map_err(|error| error.to_string())?;
                 let _ = child.child.wait();
                 join_reader(&mut child.reader_thread);
+                trace_debug("managed_process", "native kill end");
             }
             ManagedProcessInner::Prompted(child) => {
+                trace_debug("managed_process", "prompted kill begin");
                 child.child.kill().map_err(|error| error.to_string())?;
                 detach_reader(&mut child.reader_thread);
+                trace_debug("managed_process", "prompted kill end");
             }
         }
 
@@ -100,6 +109,7 @@ impl ManagedProcess {
     }
 
     fn spawn_native(command: CommandSpec) -> Result<Self, String> {
+        trace_debug("managed_process", "spawn_native begin");
         let mut child = Command::new(&command.program);
         child.args(command.args);
         child.stdin(Stdio::null());
@@ -126,6 +136,7 @@ impl ManagedProcess {
     }
 
     fn spawn_prompted(command: CommandSpec, password: &str, prompt: &str) -> Result<Self, String> {
+        trace_debug("managed_process", "spawn_prompted begin");
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -145,6 +156,7 @@ impl ManagedProcess {
             .slave
             .spawn_command(builder)
             .map_err(|error| error.to_string())?;
+        trace_debug("managed_process", "spawn_prompted child spawned");
 
         let mut reader = pair
             .master
@@ -190,6 +202,7 @@ impl ManagedProcess {
                         if !notified {
                             let clean = strip_ansi_sequences(&transcript);
                             if clean.to_ascii_lowercase().contains(&prompt) {
+                                trace_debug("managed_process", "prompt detected");
                                 let _ = prompt_tx.send(());
                                 notified = true;
                             }
@@ -210,8 +223,10 @@ impl ManagedProcess {
                 .is_ok();
 
             if received {
+                trace_debug("managed_process", "prompted writer received prompt");
                 push_log(&log_sink_writer, "password prompt detected, sending password");
             } else {
+                trace_debug("managed_process", "prompted writer timeout fallback");
                 push_log(
                     &log_sink_writer,
                     "password prompt not detected within 5s, sending password (blind fallback)",
@@ -222,6 +237,7 @@ impl ManagedProcess {
                 && writer.write_all(b"\r").is_ok()
             {
                 let _ = writer.flush();
+                trace_debug("managed_process", "prompted writer sent password");
                 push_log(&log_sink_writer, "password sent to interactive ssh session");
             }
         });
