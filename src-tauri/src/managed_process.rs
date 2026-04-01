@@ -83,8 +83,7 @@ impl ManagedProcess {
             }
             ManagedProcessInner::Prompted(child) => {
                 child.child.kill().map_err(|error| error.to_string())?;
-                let _ = child.child.wait();
-                join_reader(&mut child.reader_thread);
+                detach_reader(&mut child.reader_thread);
             }
         }
 
@@ -487,6 +486,36 @@ mod tests {
     }
 
     #[test]
+    fn prompted_kill_does_not_block_on_cleanup() {
+        let wait_calls = Arc::new(AtomicUsize::new(0));
+        let kill_calls = Arc::new(AtomicUsize::new(0));
+        let mut process = ManagedProcess {
+            inner: ManagedProcessInner::Prompted(PromptedProcess {
+                child: Box::new(KillablePromptedChild {
+                    wait_calls: Arc::clone(&wait_calls),
+                    kill_calls: Arc::clone(&kill_calls),
+                }),
+                reader_thread: Some(std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_secs(2));
+                })),
+            }),
+            logs: Arc::new(Mutex::new(Vec::new())),
+            needs_connection_signal: true,
+        };
+
+        let before = Instant::now();
+        process.kill().expect("kill prompted child");
+        let elapsed = before.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "kill blocked on cleanup for {elapsed:?}"
+        );
+        assert_eq!(kill_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(wait_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn windows_process_creation_flags_match_platform_behavior() {
         #[cfg(target_os = "windows")]
         assert_eq!(windows_process_creation_flags(), 0x0800_0000);
@@ -586,6 +615,47 @@ mod tests {
 
         fn process_id(&self) -> Option<u32> {
             Some(1)
+        }
+
+        #[cfg(target_os = "windows")]
+        fn as_raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+            None
+        }
+    }
+
+    #[derive(Debug)]
+    struct KillablePromptedChild {
+        wait_calls: Arc<AtomicUsize>,
+        kill_calls: Arc<AtomicUsize>,
+    }
+
+    impl ChildKiller for KillablePromptedChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            self.kill_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(Self {
+                wait_calls: Arc::clone(&self.wait_calls),
+                kill_calls: Arc::clone(&self.kill_calls),
+            })
+        }
+    }
+
+    impl PtyChild for KillablePromptedChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<PtyExitStatus>> {
+            Ok(None)
+        }
+
+        fn wait(&mut self) -> std::io::Result<PtyExitStatus> {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(PtyExitStatus::with_exit_code(1))
+        }
+
+        fn process_id(&self) -> Option<u32> {
+            Some(2)
         }
 
         #[cfg(target_os = "windows")]
