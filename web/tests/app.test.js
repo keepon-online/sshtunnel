@@ -547,18 +547,16 @@ test("styles keep log panels scrollable and tall enough for recent output", () =
 
   assert.match(css, /\.log-panel\s*\{[\s\S]*overflow-y:\s*auto;/);
   assert.match(css, /\.log-panel\s*\{[\s\S]*overflow-x:\s*hidden;/);
-  assert.match(css, /\.log-panel\s*\{[\s\S]*max-height:\s*clamp\(240px,\s*34vh,\s*420px\);/);
-  assert.match(css, /\.log-panel\s*\{[\s\S]*min-height:\s*220px;/);
+  assert.match(css, /\.log-panel\s*\{[\s\S]*min-height:\s*120px;/);
 });
 
-test("styles allow the main shell to scroll vertically on shorter Windows viewports", () => {
+test("shell locks viewport with fixed height and prevents page-level scroll", () => {
   const css = fs.readFileSync(path.join(__dirname, "../styles.css"), "utf8");
   const shellBlock = css.match(/\.shell\s*\{[^}]*\}/)?.[0] ?? "";
 
-  assert.match(shellBlock, /min-height:\s*100vh;/);
-  assert.match(shellBlock, /overflow-x:\s*hidden;/);
-  assert.equal(shellBlock.includes("\n  height: 100vh;"), false);
-  assert.equal(shellBlock.includes("\n  overflow: hidden;"), false);
+  assert.match(shellBlock, /height:\s*100vh;/);
+  assert.match(shellBlock, /overflow:\s*hidden;/);
+  assert.match(shellBlock, /align-items:\s*stretch;/);
 });
 
 test("tauri config centers the main window and uses lighter height constraints", () => {
