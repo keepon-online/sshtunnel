@@ -1627,6 +1627,7 @@ mod runtime_tests {
             recent_log: Vec::new(),
             disconnect_requested: false,
             reconnect_pending: false,
+            connected_since: None,
         }
     }
 
@@ -1979,6 +1980,7 @@ mod command_flow_tests {
                     recent_log: Vec::new(),
                     disconnect_requested: false,
                     reconnect_pending: false,
+                    connected_since: None,
                 },
             )]
             .into_iter()
@@ -2031,6 +2033,7 @@ mod command_flow_tests {
                     recent_log: Vec::new(),
                     disconnect_requested: false,
                     reconnect_pending: false,
+                    connected_since: None,
                 },
             )]
             .into_iter()
@@ -2223,6 +2226,7 @@ mod command_flow_tests {
                     recent_log: Vec::new(),
                     disconnect_requested: false,
                     reconnect_pending: true,
+                    connected_since: None,
                 },
             )]
             .into_iter()
@@ -2352,6 +2356,7 @@ mod tray_disconnect_all_tests {
                         recent_log: Vec::new(),
                         disconnect_requested: false,
                         reconnect_pending: false,
+                        connected_since: None,
                     },
                 ),
                 (
@@ -2362,6 +2367,7 @@ mod tray_disconnect_all_tests {
                         recent_log: Vec::new(),
                         disconnect_requested: false,
                         reconnect_pending: false,
+                        connected_since: None,
                     },
                 ),
                 (
@@ -2372,6 +2378,7 @@ mod tray_disconnect_all_tests {
                         recent_log: Vec::new(),
                         disconnect_requested: false,
                         reconnect_pending: false,
+                        connected_since: None,
                     },
                 ),
             ]
@@ -2428,6 +2435,7 @@ mod tray_disconnect_all_tests {
                     recent_log: Vec::new(),
                     disconnect_requested: false,
                     reconnect_pending: false,
+                    connected_since: None,
                 },
             )]
             .into_iter()
